@@ -214,7 +214,8 @@ private:
                          bool IsRet, CallLoweringInfo *CLI) const;
 
   template <class NodeTy>
-  SDValue getAddr(NodeTy *N, SelectionDAG &DAG, bool IsLocal = true) const;
+  SDValue getAddr(NodeTy *N, SelectionDAG &DAG, bool IsLocal = true,
+                  bool IsOverlay = false) const;
 
   SDValue getStaticTLSAddr(GlobalAddressSDNode *N, SelectionDAG &DAG,
                            bool UseGOT) const;
