@@ -333,6 +333,9 @@ def ObjCNonFragileRuntime
 // Language option for CMSE extensions
 def Cmse : LangOpt<"Cmse">;
 
+// Language option for Overlay functions
+def OverlayFunctions : LangOpt<"OverlayFunctions">;
+
 // Defines targets for target-specific attributes. Empty lists are unchecked.
 class TargetSpec {
   // Specifies Architectures for which the target applies, based off the

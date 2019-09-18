@@ -1977,6 +1977,9 @@ void Clang::AddRISCVTargetArgs(const ArgList &Args,
   CmdArgs.push_back(ABIName.data());
 
   SetRISCVSmallDataLimit(getToolChain(), Args, CmdArgs);
+
+  if (Args.getLastArg(options::OPT_fcomrv))
+    CmdArgs.push_back("-fcomrv");
 }
 
 void Clang::AddSparcTargetArgs(const ArgList &Args,

@@ -3465,6 +3465,9 @@ static void ParseLangArgs(LangOptions &Opts, ArgList &Args, InputKind IK,
       Args.hasFlag(OPT_fexperimental_relative_cxx_abi_vtables,
                    OPT_fno_experimental_relative_cxx_abi_vtables,
                    /*default=*/false);
+
+  // RISC-V overlay functions support
+  Opts.OverlayFunctions = Args.hasArg(OPT_fcomrv);
 }
 
 static bool isStrictlyPreprocessorAction(frontend::ActionKind Action) {
@@ -3825,6 +3828,8 @@ bool CompilerInvocation::CreateFromArgs(CompilerInvocation &Res,
   // Store the command-line for using in the CodeView backend.
   Res.getCodeGenOpts().Argv0 = Argv0;
   Res.getCodeGenOpts().CommandLineArgs = CommandLineArgs;
+
+  LangOpts.OverlayFunctions = Args.hasArg(OPT_fcomrv);
 
   return Success;
 }
