@@ -2386,6 +2386,7 @@ SDValue RISCVTargetLowering::LowerCall(CallLoweringInfo &CLI,
   // TargetGlobalAddress/TargetExternalSymbol node so that legalize won't
   // split it and then direct call can be matched by PseudoCALL.
   bool isOVLCC = false;
+  bool isIndirect = false;
   if (GlobalAddressSDNode *S = dyn_cast<GlobalAddressSDNode>(Callee)) {
     const GlobalValue *GV = S->getGlobal();
 
@@ -2424,6 +2425,7 @@ SDValue RISCVTargetLowering::LowerCall(CallLoweringInfo &CLI,
     // which is always '1' if the address referes to an overlay group.
     if (MF.getFunction().getCallingConv() != CallingConv::RISCV_OverlayCall)
       isOVLCC = true;  // FIXME: Use a different flag
+    isIndirect = true;
   }
 
   // The first call operand is the chain and the second is the target address.
@@ -2456,11 +2458,16 @@ SDValue RISCVTargetLowering::LowerCall(CallLoweringInfo &CLI,
     return DAG.getNode(RISCVISD::TAIL, DL, NodeTys, Ops);
   }
 
-  Chain = DAG.getNode(RISCVISD::CALL, DL, NodeTys, Ops);
-  if (isOVLCC)
+  if (isIndirect) {
+    if (MF.getFunction().getCallingConv() == CallingConv::RISCV_OverlayCall)
+      Chain = DAG.getNode(RISCVISD::OVLCALL_FROM_OVERLAY, DL, NodeTys, Ops);
+    else
+      Chain = DAG.getNode(RISCVISD::OVLCALL_FROM_RESIDENT, DL, NodeTys, Ops);
+  } else if (isOVLCC) {
     Chain = DAG.getNode(RISCVISD::OVLCALL, DL, NodeTys, Ops);
-  else
+  } else {
     Chain = DAG.getNode(RISCVISD::CALL, DL, NodeTys, Ops);
+  }
   DAG.addNoMergeSiteInfo(Chain.getNode(), CLI.NoMerge);
   Glue = Chain.getValue(1);
 
@@ -2677,6 +2684,10 @@ const char *RISCVTargetLowering::getTargetNodeName(unsigned Opcode) const {
     return "RISCVISD::READ_CYCLE_WIDE";
   case RISCVISD::OVLCALL:
     return "RISCVISD::OVLCALL";
+  case RISCVISD::OVLCALL_FROM_RESIDENT:
+    return "RISCVISD::OVLCALL_FROM_RESIDENT";
+  case RISCVISD::OVLCALL_FROM_OVERLAY:
+    return "RISCVISD::OVLCALL_FROM_OVERLAY";
   }
   return nullptr;
 }
