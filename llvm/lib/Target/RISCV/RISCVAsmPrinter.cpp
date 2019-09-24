@@ -49,6 +49,8 @@ public:
 
   bool runOnMachineFunction(MachineFunction &MF) override;
 
+  const MCExpr *lowerConstant(const Constant *CV) override;
+
   void emitInstruction(const MachineInstr *MI) override;
 
   bool PrintAsmOperand(const MachineInstr *MI, unsigned OpNo,
@@ -201,6 +203,18 @@ void RISCVAsmPrinter::emitAttributes() {
   const RISCVSubtarget STI(TT, CPU, FS, /*ABIName=*/"", RTM);
 
   RTS.emitTargetAttributes(STI);
+}
+
+const MCExpr *RISCVAsmPrinter::lowerConstant(const Constant *CV) {
+  if (auto *Fn = dyn_cast<Function>(CV)) {
+    if (Fn->getCallingConv() == llvm::CallingConv::RISCV_OverlayCall) {
+      const MCSymbolRefExpr *Expr =
+          MCSymbolRefExpr::create(getSymbol(cast<GlobalValue>(CV)),
+                                  MCSymbolRefExpr::VK_RISCV_OVLPLT, OutContext);
+      return Expr;
+    }
+  }
+  return AsmPrinter::lowerConstant(CV);
 }
 
 // Force static initialization.
