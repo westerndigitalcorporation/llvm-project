@@ -7442,6 +7442,15 @@ static void ProcessDeclAttribute(Sema &S, Scope *scope, Decl *D,
     handleArmBuiltinAliasAttr(S, D, AL);
     break;
 
+  case ParsedAttr::AT_RISCVOverlayData:
+    if (!S.getLangOpts().OverlayFunctions) {
+      AL.setInvalid();
+      S.Diag(AL.getLoc(), diag::err_overlaydata_unsupported);
+      break;
+    }
+    D->addAttr(::new (S.Context) RISCVOverlayDataAttr(S.Context, AL));
+    break;
+
   case ParsedAttr::AT_AcquireHandle:
     handleAcquireHandleAttr(S, D, AL);
     break;

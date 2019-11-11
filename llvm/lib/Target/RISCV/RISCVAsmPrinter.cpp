@@ -214,6 +214,14 @@ const MCExpr *RISCVAsmPrinter::lowerConstant(const Constant *CV) {
       return Expr;
     }
   }
+  if (auto *GV = dyn_cast<GlobalVariable>(CV)) {
+    if (GV->hasAttribute("overlay-data")) {
+      const MCSymbolRefExpr *Expr =
+          MCSymbolRefExpr::create(getSymbol(cast<GlobalValue>(CV)),
+                                  MCSymbolRefExpr::VK_RISCV_OVL, OutContext);
+      return Expr;
+    }
+  }
   return AsmPrinter::lowerConstant(CV);
 }
 

@@ -345,6 +345,7 @@ public:
 
     // A SymbolRef VK is needed in order to parse e.g. `.word foo@overlay_plt`
     VK_RISCV_OVLPLT,         // overlay_plt
+    VK_RISCV_OVL,            // overlay
 
     VK_TPREL,
     VK_DTPREL

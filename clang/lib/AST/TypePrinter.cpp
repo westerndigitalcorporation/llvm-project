@@ -1640,6 +1640,8 @@ void TypePrinter::printAttributedAfter(const AttributedType *T,
     break;
   case attr::ArmSveVectorBits:
     OS << "arm_sve_vector_bits";
+  case attr::RISCVOverlayData:
+    OS << "overlaydata";
     break;
   }
   OS << "))";

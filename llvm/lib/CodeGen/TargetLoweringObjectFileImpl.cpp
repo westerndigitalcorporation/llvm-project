@@ -617,6 +617,13 @@ getELFSectionNameForGlobal(const GlobalObject *GO, SectionKind Kind,
           llvm::CallingConv::RISCV_OverlayCall)
     Name += ".ovlfn";
 
+  // For overlay data, add the section previx ".ovldata"
+  if (isa<GlobalVariable>(GO) &&
+      cast<GlobalVariable>(GO)->hasAttribute("overlay-data")) {
+    assert(Name == ".rodata" && "non-constant ovldata?");
+    Name += ".ovldata";
+  }
+
   bool HasPrefix = false;
   if (const auto *F = dyn_cast<Function>(GO)) {
     if (Optional<StringRef> Prefix = F->getSectionPrefix()) {
@@ -818,6 +825,9 @@ MCSection *TargetLoweringObjectFileELF::SelectSectionForGlobal(
   if (Kind.isText() && isa<Function>(GO) &&
       cast<Function>(GO)->getCallingConv() ==
           llvm::CallingConv::RISCV_OverlayCall)
+    EmitUniqueSection = true;
+  if (isa<GlobalVariable>(GO) &&
+      cast<GlobalVariable>(GO)->hasAttribute("overlay-data"))
     EmitUniqueSection = true;
 
   MCSectionELF *Section = selectELFSectionForGlobal(
