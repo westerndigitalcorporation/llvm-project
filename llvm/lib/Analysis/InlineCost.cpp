@@ -2328,6 +2328,12 @@ Optional<InlineResult> llvm::getAttributeBasedInliningDecision(
   if (!Callee)
     return InlineResult::failure("indirect call");
 
+  // Don't inline overlay functions, or inline into overlay functions
+  if (Call.getFunction()->getCallingConv() == CallingConv::RISCV_OverlayCall)
+    return InlineResult::failure("caller is overlaycall");
+  if (Callee && Callee->getCallingConv() == CallingConv::RISCV_OverlayCall)
+    return InlineResult::failure("callee is overlaycall");
+
   // Never inline calls with byval arguments that does not have the alloca
   // address space. Since byval arguments can be replaced with a copy to an
   // alloca, the inlined code would need to be adjusted to handle that the
