@@ -116,6 +116,7 @@ SectionFilter ToolSectionFilter(llvm::object::ObjectFile const &O,
                                 uint64_t *Idx = nullptr);
 
 bool isRelocAddressLess(object::RelocationRef A, object::RelocationRef B);
+void printComRVOverlayData(const object::ObjectFile *Obj);
 void printRelocations(const object::ObjectFile *O);
 void printDynamicRelocations(const object::ObjectFile *O);
 void printSectionHeaders(const object::ObjectFile *O);
