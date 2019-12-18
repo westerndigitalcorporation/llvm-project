@@ -103,6 +103,8 @@ public:
   void emitDirectiveOptionNoRVC() override;
   void emitDirectiveOptionRelax() override;
   void emitDirectiveOptionNoRelax() override;
+  void emitDirectiveOptionWarnReservedReg() override;
+  void emitDirectiveOptionNoWarnReservedReg() override;
 };
 }
 #endif

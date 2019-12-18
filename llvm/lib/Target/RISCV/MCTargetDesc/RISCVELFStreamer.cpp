@@ -72,6 +72,8 @@ void RISCVTargetELFStreamer::emitDirectiveOptionRVC() {}
 void RISCVTargetELFStreamer::emitDirectiveOptionNoRVC() {}
 void RISCVTargetELFStreamer::emitDirectiveOptionRelax() {}
 void RISCVTargetELFStreamer::emitDirectiveOptionNoRelax() {}
+void RISCVTargetELFStreamer::emitDirectiveOptionWarnReservedReg() {}
+void RISCVTargetELFStreamer::emitDirectiveOptionNoWarnReservedReg() {}
 
 void RISCVTargetELFStreamer::emitAttribute(unsigned Attribute, unsigned Value) {
   setAttributeItem(Attribute, Value, /*OverwriteExisting=*/true);
