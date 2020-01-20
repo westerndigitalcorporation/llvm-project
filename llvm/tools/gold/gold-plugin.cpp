@@ -136,6 +136,9 @@ namespace options {
   };
   static OutputType TheOutputType = OT_NORMAL;
   static unsigned OptLevel = 2;
+  static unsigned OptSize = 0;
+  // Default parallelism of 0 used to indicate that user did not specify.
+  // Actual parallelism default value depends on implementation.
   // Currently only affects ThinLTO, where the default is the max cores in the
   // system. See llvm::get_threadpool_strategy() for acceptable values.
   static std::string Parallelism;
@@ -263,6 +266,12 @@ namespace options {
       cache_dir = std::string(opt);
     } else if (opt.consume_front("cache-policy=")) {
       cache_policy = std::string(opt);
+    } else if (opt == "Os") {
+      OptLevel = 2;
+      OptSize = 1;
+    } else if (opt == "Oz") {
+      OptLevel = 2;
+      OptSize = 2;
     } else if (opt.size() == 2 && opt[0] == 'O') {
       if (opt[1] < '0' || opt[1] > '3')
         message(LDPL_FATAL, "Optimization level must be between 0 and 3");
@@ -874,6 +883,7 @@ static std::unique_ptr<LTO> createLTO(IndexWriteCallback OnIndexWrite,
   Conf.PTO.SLPVectorization = options::OptLevel > 1;
   Conf.AlwaysEmitRegularLTOObj = !options::obj_path.empty();
 
+  Conf.OptSize = options::OptSize;
   if (options::thinlto_index_only) {
     std::string OldPrefix, NewPrefix;
     getThinLTOOldAndNewPrefix(OldPrefix, NewPrefix);
