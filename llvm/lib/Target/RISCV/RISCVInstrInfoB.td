@@ -632,3 +632,55 @@ let Predicates = [HasStdExtZbproposedc, HasStdExtZbbOrZbp, HasStdExtC, IsRV64] i
 def : CompressPat<(PACK GPRC:$rs1, GPRC:$rs1, X0),
                   (C_ZEXTW GPRC:$rs1)>;
 } // Predicates = [HasStdExtZbproposedc, HasStdExtC, IsRV64]
+
+//===----------------------------------------------------------------------===//
+// Codegen patterns
+//===----------------------------------------------------------------------===//
+
+let Predicates = [HasStdExtZbb] in {
+def : Pat<(xor (shl (xor GPR:$rs1, -1), GPR:$rs2), -1),
+          (SLO GPR:$rs1, GPR:$rs2)>;
+def : Pat<(xor (srl (xor GPR:$rs1, -1), GPR:$rs2), -1),
+          (SRO GPR:$rs1, GPR:$rs2)>;
+def : Pat<(ctlz GPR:$rs1), (CLZ GPR:$rs1)>;
+def : Pat<(cttz GPR:$rs1), (CTZ GPR:$rs1)>;
+def : Pat<(ctpop GPR:$rs1), (PCNT GPR:$rs1)>;
+} // Predicates = [HasStdExtZbb]
+
+let Predicates = [HasStdExtZbb, IsRV32] in
+def : Pat<(sra (shl GPR:$rs1, (i32 24)), (i32 24)), (SEXTB GPR:$rs1)>;
+let Predicates = [HasStdExtZbb, IsRV64] in
+def : Pat<(sra (shl GPR:$rs1, (i64 56)), (i64 56)), (SEXTB GPR:$rs1)>;
+
+let Predicates = [HasStdExtZbb, IsRV32] in
+def : Pat<(sra (shl GPR:$rs1, (i32 16)), (i32 16)), (SEXTH GPR:$rs1)>;
+let Predicates = [HasStdExtZbb, IsRV64] in
+def : Pat<(sra (shl GPR:$rs1, (i64 48)), (i64 48)), (SEXTH GPR:$rs1)>;
+
+let Predicates = [HasStdExtZbb] in {
+def : Pat<(smin GPR:$rs1, GPR:$rs2), (MIN  GPR:$rs1, GPR:$rs2)>;
+def : Pat<(riscv_selectcc GPR:$rs1, GPR:$rs2, (XLenVT 20), GPR:$rs1, GPR:$rs2),
+          (MIN  GPR:$rs1, GPR:$rs2)>;
+def : Pat<(smax GPR:$rs1, GPR:$rs2), (MAX  GPR:$rs1, GPR:$rs2)>;
+def : Pat<(riscv_selectcc GPR:$rs2, GPR:$rs1, (XLenVT 20), GPR:$rs1, GPR:$rs2),
+          (MAX  GPR:$rs1, GPR:$rs2)>;
+def : Pat<(umin GPR:$rs1, GPR:$rs2), (MINU GPR:$rs1, GPR:$rs2)>;
+def : Pat<(riscv_selectcc GPR:$rs1, GPR:$rs2, (XLenVT 12), GPR:$rs1, GPR:$rs2),
+          (MINU  GPR:$rs1, GPR:$rs2)>;
+def : Pat<(umax GPR:$rs1, GPR:$rs2), (MAXU GPR:$rs1, GPR:$rs2)>;
+def : Pat<(riscv_selectcc GPR:$rs2, GPR:$rs1, (XLenVT 12), GPR:$rs1, GPR:$rs2),
+          (MAXU  GPR:$rs1, GPR:$rs2)>;
+} // Predicates = [HasStdExtZbb]
+
+let Predicates = [HasStdExtZbb, IsRV64] in {
+def : Pat<(and (add GPR:$rs, simm12:$simm12), 0xFFFFFFFF),
+          (ADDIWU GPR:$rs, simm12:$simm12)>;
+def : Pat<(and (add GPR:$rs1, GPR:$rs2), 0xFFFFFFFF),
+          (ADDWU GPR:$rs1, GPR:$rs2)>;
+def : Pat<(and (sub GPR:$rs1, GPR:$rs2), 0xFFFFFFFF),
+          (SUBWU GPR:$rs1, GPR:$rs2)>;
+def : Pat<(add GPR:$rs1, (and GPR:$rs2, 0xFFFFFFFF)),
+          (ADDUW GPR:$rs1, GPR:$rs2)>;
+def : Pat<(sub GPR:$rs1, (and GPR:$rs2, 0xFFFFFFFF)),
+          (SUBUW GPR:$rs1, GPR:$rs2)>;
+} // Predicates = [HasStdExtZbb, IsRV64]
