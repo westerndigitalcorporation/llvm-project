@@ -637,12 +637,25 @@ def : CompressPat<(PACK GPRC:$rs1, GPRC:$rs1, X0),
 // Codegen patterns
 //===----------------------------------------------------------------------===//
 
+let Predicates = [HasStdExtZbbOrZbp] in {
+def : Pat<(and GPR:$rs1, (not GPR:$rs2)), (ANDN GPR:$rs1, GPR:$rs2)>;
+def : Pat<(or  GPR:$rs1, (not GPR:$rs2)), (ORN  GPR:$rs1, GPR:$rs2)>;
+def : Pat<(xor GPR:$rs1, (not GPR:$rs2)), (XNOR GPR:$rs1, GPR:$rs2)>;
+} // Predicates = [HasStdExtZbbOrZbp]
+
 let Predicates = [HasStdExtZbb] in {
 def : Pat<(xor (shl (xor GPR:$rs1, -1), GPR:$rs2), -1),
           (SLO GPR:$rs1, GPR:$rs2)>;
 def : Pat<(xor (srl (xor GPR:$rs1, -1), GPR:$rs2), -1),
           (SRO GPR:$rs1, GPR:$rs2)>;
 } // Predicates = [HasStdExtZbb]
+
+let Predicates = [HasStdExtZbbOrZbp] in {
+def : Pat<(rotl GPR:$rs1, GPR:$rs2), (ROL GPR:$rs1, GPR:$rs2)>;
+def : Pat<(fshl GPR:$rs1, GPR:$rs1, GPR:$rs2), (ROL GPR:$rs1, GPR:$rs2)>;
+def : Pat<(rotr GPR:$rs1, GPR:$rs2), (ROR GPR:$rs1, GPR:$rs2)>;
+def : Pat<(fshr GPR:$rs1, GPR:$rs1, GPR:$rs2), (ROR GPR:$rs1, GPR:$rs2)>;
+} // Predicates = [HasStdExtZbbOrZbp]
 
 let Predicates = [HasStdExtZbp, IsRV32] in {
 def : Pat<(or (or (and (srl GPR:$rs1, (i32 1)), (i32 0x55555555)), GPR:$rs1),
@@ -764,6 +777,23 @@ def : Pat<(umax GPR:$rs1, GPR:$rs2), (MAXU GPR:$rs1, GPR:$rs2)>;
 def : Pat<(riscv_selectcc GPR:$rs2, GPR:$rs1, (XLenVT 12), GPR:$rs1, GPR:$rs2),
           (MAXU  GPR:$rs1, GPR:$rs2)>;
 } // Predicates = [HasStdExtZbb]
+
+let Predicates = [HasStdExtZbbOrZbp, IsRV32] in
+def : Pat<(or (and GPR:$rs1, 0x0000FFFF), (shl GPR:$rs2, (i32 16))),
+          (PACK GPR:$rs1, GPR:$rs2)>;
+let Predicates = [HasStdExtZbbOrZbp, IsRV64] in
+def : Pat<(or (and GPR:$rs1, 0x00000000FFFFFFFF), (shl GPR:$rs2, (i64 32))),
+          (PACK GPR:$rs1, GPR:$rs2)>;
+let Predicates = [HasStdExtZbbOrZbp, IsRV32] in
+def : Pat<(or (and GPR:$rs2, 0xFFFF0000), (srl GPR:$rs1, (i32 16))),
+          (PACKU GPR:$rs1, GPR:$rs2)>;
+let Predicates = [HasStdExtZbbOrZbp, IsRV64] in
+def : Pat<(or (and GPR:$rs2, 0xFFFFFFFF00000000), (srl GPR:$rs1, (i64 32))),
+          (PACKU GPR:$rs1, GPR:$rs2)>;
+let Predicates = [HasStdExtZbbOrZbp] in
+def : Pat<(or (and (shl GPR:$rs2, (XLenVT 8)), 0xFF00),
+              (and GPR:$rs1, 0x00FF)),
+          (PACKH GPR:$rs1, GPR:$rs2)>;
 
 let Predicates = [HasStdExtZbp, IsRV32] in {
 def : Pat<(or (or (and (shl GPR:$rs1, (i32 8)), (i32 0x00FF0000)),
