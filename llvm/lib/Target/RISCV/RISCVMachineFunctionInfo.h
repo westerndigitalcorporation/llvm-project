@@ -56,7 +56,7 @@ public:
     // We cannot use fixed locations for the callee saved spill slots if the
     // function uses a varargs save area.
     return MF.getSubtarget<RISCVSubtarget>().enableSaveRestore() &&
-           VarArgsSaveSize == 0 && !MF.getFrameInfo().hasTailCall();
+           VarArgsSaveSize == 0;
   }
 };
 

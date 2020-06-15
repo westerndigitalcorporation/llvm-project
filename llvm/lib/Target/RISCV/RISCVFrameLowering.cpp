@@ -94,7 +94,8 @@ getSpillLibCallName(const MachineFunction &MF,
 // If this function will not use save/restore libcalls, then return a nullptr.
 static const char *
 getRestoreLibCallName(const MachineFunction &MF,
-                      const std::vector<CalleeSavedInfo> &CSI) {
+                      const std::vector<CalleeSavedInfo> &CSI,
+                      bool TailCallSite) {
   static const char *const RestoreLibCalls[] = {
     "__riscv_restore_0",
     "__riscv_restore_1",
@@ -110,10 +111,27 @@ getRestoreLibCallName(const MachineFunction &MF,
     "__riscv_restore_11",
     "__riscv_restore_12"
   };
+  static const char *const RestoreLibCallsTC[] = {
+    "__riscv_restore_tailcall_0",
+    "__riscv_restore_tailcall_1",
+    "__riscv_restore_tailcall_2",
+    "__riscv_restore_tailcall_3",
+    "__riscv_restore_tailcall_4",
+    "__riscv_restore_tailcall_5",
+    "__riscv_restore_tailcall_6",
+    "__riscv_restore_tailcall_7",
+    "__riscv_restore_tailcall_8",
+    "__riscv_restore_tailcall_9",
+    "__riscv_restore_tailcall_10",
+    "__riscv_restore_tailcall_11",
+    "__riscv_restore_tailcall_12"
+  };
 
   int LibCallID = getLibCallID(MF, CSI);
   if (LibCallID == -1)
     return nullptr;
+  if (TailCallSite)
+    return RestoreLibCallsTC[LibCallID];
   return RestoreLibCalls[LibCallID];
 }
 
@@ -710,19 +728,69 @@ bool RISCVFrameLowering::restoreCalleeSavedRegisters(
     assert(MI != MBB.begin() && "loadRegFromStackSlot didn't insert any code!");
   }
 
-  const char *RestoreLibCall = getRestoreLibCallName(*MF, CSI);
+  bool IsTailCall =
+      MI != MBB.end() && (MI->getOpcode() == RISCV::PseudoTAIL ||
+                          MI->getOpcode() == RISCV::PseudoTAILIndirect);
+  const char *RestoreLibCall = getRestoreLibCallName(*MF, CSI, IsTailCall);
   if (RestoreLibCall) {
-    // Add restore libcall via tail call.
-    MachineBasicBlock::iterator NewMI =
-        BuildMI(MBB, MI, DL, TII.get(RISCV::PseudoTAIL))
-            .addExternalSymbol(RestoreLibCall, RISCVII::MO_CALL)
-            .setMIFlag(MachineInstr::FrameDestroy);
+    if (IsTailCall) {
+      // Add restore libcall via tail call. X6/T1 is added as use as this holds
+      // the pointer to tailcall to.
+      MachineBasicBlock::iterator NewMI =
+          BuildMI(MBB, MI, DL, TII.get(RISCV::PseudoTAIL))
+              .addExternalSymbol(RestoreLibCall, RISCVII::MO_CALL)
+              .addReg(RISCV::X6 /*T1*/, RegState::Implicit)
+              .setMIFlag(MachineInstr::FrameDestroy);
 
-    // Remove trailing returns, since the terminator is now a tail call to the
-    // restore function.
-    if (MI != MBB.end() && MI->getOpcode() == RISCV::PseudoRET) {
+      switch (MI->getOperand(0).getType()) {
+      default:
+#if !defined(NDEBUG) || defined(LLVM_ENABLE_DUMP)
+        MI->dump();
+#endif
+        llvm_unreachable("Unexpected operand type for restore_tailcall!");
+      case MachineOperand::MO_GlobalAddress:
+        BuildMI(MBB, NewMI, DL, TII.get(RISCV::LUI), RISCV::X6 /*T1*/)
+            .addGlobalAddress(MI->getOperand(0).getGlobal(), 0, RISCVII::MO_HI)
+            .setMIFlag(MachineInstr::FrameDestroy);
+        BuildMI(MBB, NewMI, DL, TII.get(RISCV::ADDI), RISCV::X6 /*T1*/)
+            .addReg(RISCV::X6 /*T1*/)
+            .addGlobalAddress(MI->getOperand(0).getGlobal(), 0, RISCVII::MO_LO)
+            .setMIFlag(MachineInstr::FrameDestroy);
+        break;
+      case MachineOperand::MO_ExternalSymbol:
+        BuildMI(MBB, NewMI, DL, TII.get(RISCV::LUI), RISCV::X6 /*T1*/)
+            .addExternalSymbol(MI->getOperand(0).getSymbolName(),
+                               RISCVII::MO_HI)
+            .setMIFlag(MachineInstr::FrameDestroy);
+        BuildMI(MBB, NewMI, DL, TII.get(RISCV::ADDI), RISCV::X6 /*T1*/)
+            .addReg(RISCV::X6 /*T1*/)
+            .addExternalSymbol(MI->getOperand(0).getSymbolName(),
+                               RISCVII::MO_LO)
+            .setMIFlag(MachineInstr::FrameDestroy);
+        break;
+      case MachineOperand::MO_Register:
+        if (MI->getOperand(0).getReg() != RISCV::X6 /*T1*/)
+          BuildMI(MBB, NewMI, DL, TII.get(RISCV::ADDI), RISCV::X6 /*T1*/)
+              .addReg(MI->getOperand(0).getReg())
+              .addImm(0)
+              .setMIFlag(MachineInstr::FrameDestroy);
+        break;
+      }
       NewMI->copyImplicitOps(*MF, *MI);
       MI->eraseFromParent();
+    } else {
+      // Add restore libcall via tail call.
+      MachineBasicBlock::iterator NewMI =
+          BuildMI(MBB, MI, DL, TII.get(RISCV::PseudoTAIL))
+              .addExternalSymbol(RestoreLibCall, RISCVII::MO_CALL)
+              .setMIFlag(MachineInstr::FrameDestroy);
+
+      // Remove trailing returns, since the terminator is now a tail call to the
+      // restore function.
+      if (MI != MBB.end() && MI->getOpcode() == RISCV::PseudoRET) {
+        NewMI->copyImplicitOps(*MF, *MI);
+        MI->eraseFromParent();
+      }
     }
   }
 

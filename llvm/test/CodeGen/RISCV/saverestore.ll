@@ -137,7 +137,7 @@ define void @callee_saved_fp() nounwind {
   ret void
 }
 
-; Check that preserving tail calls is preferred over save/restore
+; Check that preserving tail calls is preferred over save/restorem
 
 declare i32 @tail_callee(i32 %i)
 
@@ -153,24 +153,28 @@ define i32 @tail_call(i32 %i) nounwind {
 ; RV64I-NOT:     tail __riscv_restore
 ;
 ; RV32I-SR-LABEL: tail_call:
-; RV32I-SR-NOT:     call t0, __riscv_save
-; RV32I-SR:         tail tail_callee
-; RV32I-SR-NOT:     tail __riscv_restore
+; RV32I-SR:         call t0, __riscv_save
+; RV32I-SR:         lui t1, %hi(tail_callee)
+; RV32I-SR:         addi t1, t1, %lo(tail_callee)
+; RV32I-SR:         tail __riscv_restore_tailcall_6
 ;
 ; RV64I-SR-LABEL: tail_call:
-; RV64I-SR-NOT:     call t0, __riscv_save
-; RV64I-SR:         tail tail_callee
-; RV64I-SR-NOT:     tail __riscv_restore
+; RV64I-SR:         call t0, __riscv_save
+; RV64I-SR:         lui t1, %hi(tail_callee)
+; RV64I-SR:         addi t1, t1, %lo(tail_callee)
+; RV64I-SR:         tail __riscv_restore_tailcall_6
 ;
 ; RV32I-FP-SR-LABEL: tail_call:
-; RV32I-FP-SR-NOT:     call t0, __riscv_save
-; RV32I-FP-SR:         tail tail_callee
-; RV32I-FP-SR-NOT:     tail __riscv_restore
+; RV32I-FP-SR:         call t0, __riscv_save
+; RV32I-FP-SR:         lui t1, %hi(tail_callee)
+; RV32I-FP-SR:         addi t1, t1, %lo(tail_callee)
+; RV32I-FP-SR:         tail __riscv_restore_tailcall_6
 ;
 ; RV64I-FP-SR-LABEL: tail_call:
-; RV64I-FP-SR-NOT:     call t0, __riscv_save
-; RV64I-FP-SR:         tail tail_callee
-; RV64I-FP-SR-NOT:     tail __riscv_restore
+; RV64I-FP-SR:         call t0, __riscv_save
+; RV64I-FP-SR:         lui t1, %hi(tail_callee)
+; RV64I-FP-SR:         addi t1, t1, %lo(tail_callee)
+; RV64I-FP-SR:         tail __riscv_restore_tailcall_6
 entry:
   %val = load [18 x i32], [18 x i32]* @var0
   store volatile [18 x i32] %val, [18 x i32]* @var0
