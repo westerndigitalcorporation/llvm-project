@@ -200,6 +200,7 @@ RISCVTargetLowering::RISCVTargetLowering(const TargetMachine &TM,
   setOperationAction(ISD::GlobalAddress, XLenVT, Custom);
   setOperationAction(ISD::BlockAddress, XLenVT, Custom);
   setOperationAction(ISD::ConstantPool, XLenVT, Custom);
+  setOperationAction(ISD::JumpTable, XLenVT, Custom);
 
   setOperationAction(ISD::GlobalTLSAddress, XLenVT, Custom);
 
@@ -226,8 +227,10 @@ RISCVTargetLowering::RISCVTargetLowering(const TargetMachine &TM,
   setMinFunctionAlignment(FunctionAlignment);
   setPrefFunctionAlignment(FunctionAlignment);
 
-  // Effectively disable jump table generation.
-  setMinimumJumpTableEntries(INT_MAX);
+  // Disable jump table generation where it is not beneficial. This is due to
+  // the fixed overhead of jump tables not outweighing the savings for lower
+  // numbers of entries. See isSuitableForJumpTable for more detail.
+  setMinimumJumpTableEntries(10);
 }
 
 EVT RISCVTargetLowering::getSetCCResultType(const DataLayout &DL, LLVMContext &,
@@ -403,6 +406,8 @@ SDValue RISCVTargetLowering::LowerOperation(SDValue Op,
     return lowerBlockAddress(Op, DAG);
   case ISD::ConstantPool:
     return lowerConstantPool(Op, DAG);
+  case ISD::JumpTable:
+    return lowerJumpTable(Op, DAG);
   case ISD::GlobalTLSAddress:
     return lowerGlobalTLSAddress(Op, DAG);
   case ISD::SELECT:
@@ -450,6 +455,11 @@ static SDValue getTargetNode(ConstantPoolSDNode *N, SDLoc DL, EVT Ty,
                              SelectionDAG &DAG, unsigned Flags) {
   return DAG.getTargetConstantPool(N->getConstVal(), Ty, N->getAlign(),
                                    N->getOffset(), Flags);
+}
+
+static SDValue getTargetNode(JumpTableSDNode *N, SDLoc DL, EVT Ty,
+                             SelectionDAG &DAG, unsigned Flags) {
+  return DAG.getTargetJumpTable(N->getIndex(), Ty, Flags);
 }
 
 template <class NodeTy>
@@ -525,6 +535,13 @@ SDValue RISCVTargetLowering::lowerBlockAddress(SDValue Op,
 SDValue RISCVTargetLowering::lowerConstantPool(SDValue Op,
                                                SelectionDAG &DAG) const {
   ConstantPoolSDNode *N = cast<ConstantPoolSDNode>(Op);
+
+  return getAddr(N, DAG);
+}
+
+SDValue RISCVTargetLowering::lowerJumpTable(SDValue Op,
+                                            SelectionDAG &DAG) const {
+  JumpTableSDNode *N = cast<JumpTableSDNode>(Op);
 
   return getAddr(N, DAG);
 }
@@ -1405,6 +1422,28 @@ RISCVTargetLowering::EmitInstrWithCustomInserter(MachineInstr &MI,
   case RISCV::SplitF64Pseudo:
     return emitSplitF64Pseudo(MI, BB);
   }
+}
+
+bool RISCVTargetLowering::isSuitableForJumpTable(
+    const SwitchInst *SI, uint64_t NumCases, uint64_t Range,
+    ProfileSummaryInfo *PSI, BlockFrequencyInfo *BFI) const {
+  if (!TargetLowering::isSuitableForJumpTable(SI, NumCases, Range, PSI, BFI))
+    return false;
+
+  // Without jumptables, most comparisons require 2 instructions, materializing
+  // a value and comparing against that value. One case requires only a bnez.
+  // Thus the overhead in instructions is 2 * (NumCases - 1) + 1.
+  //
+  // With jumptables the overhead is the number of entries in the jump table -
+  // equal to the range - and a constant overhead. This consists of:
+  // - 2 instructions to check against the default case
+  // - 1 instruction to adjust the case value to be an address offset
+  // - 2 instructions to load the address of the jump table symbol
+  // - 1 instruction to add case value to the jump table address
+  // - 1 instruction for loading the jump table entry
+  // - 1 instruction for a jump through register
+  // This the overhead in instructions is Range + 8.
+  return (2 * NumCases - 1) > (Range + 8);
 }
 
 // Calling Convention Implementation.
