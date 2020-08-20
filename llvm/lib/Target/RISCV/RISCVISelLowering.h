@@ -161,6 +161,10 @@ public:
   Register getRegisterByName(const char *RegName, LLT VT,
                              const MachineFunction &MF) const override;
 
+  bool isSuitableForJumpTable(const SwitchInst *SI, uint64_t NumCases,
+                              uint64_t Range, ProfileSummaryInfo *PSI,
+                              BlockFrequencyInfo *BFI) const override;
+
 private:
   void analyzeInputArgs(MachineFunction &MF, CCState &CCInfo,
                         const SmallVectorImpl<ISD::InputArg> &Ins,
@@ -201,6 +205,7 @@ private:
   SDValue lowerGlobalAddress(SDValue Op, SelectionDAG &DAG) const;
   SDValue lowerBlockAddress(SDValue Op, SelectionDAG &DAG) const;
   SDValue lowerConstantPool(SDValue Op, SelectionDAG &DAG) const;
+  SDValue lowerJumpTable(SDValue Op, SelectionDAG &DAG) const;
   SDValue lowerGlobalTLSAddress(SDValue Op, SelectionDAG &DAG) const;
   SDValue lowerSELECT(SDValue Op, SelectionDAG &DAG) const;
   SDValue lowerVASTART(SDValue Op, SelectionDAG &DAG) const;
