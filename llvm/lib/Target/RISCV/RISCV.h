@@ -37,6 +37,9 @@ bool LowerRISCVMachineOperandToMCOperand(const MachineOperand &MO,
 
 FunctionPass *createRISCVISelDag(RISCVTargetMachine &TM);
 
+FunctionPass *createRISCVCompressRegistersOptPass();
+void initializeRISCVCompressRegistersOptPass(PassRegistry &);
+
 FunctionPass *createRISCVMergeBaseOffsetOptPass();
 void initializeRISCVMergeBaseOffsetOptPass(PassRegistry &);
 

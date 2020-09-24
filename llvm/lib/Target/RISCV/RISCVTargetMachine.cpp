@@ -167,7 +167,10 @@ bool RISCVPassConfig::addGlobalInstructionSelect() {
   return false;
 }
 
-void RISCVPassConfig::addPreEmitPass() { addPass(&BranchRelaxationPassID); }
+void RISCVPassConfig::addPreEmitPass() {
+  addPass(&BranchRelaxationPassID);
+  addPass(createRISCVCompressRegistersOptPass());
+}
 
 void RISCVPassConfig::addPreEmitPass2() {
   // Schedule the expansion of AMOs at the last possible moment, avoiding the
