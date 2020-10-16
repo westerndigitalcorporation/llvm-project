@@ -47,9 +47,20 @@ char RISCVCompressRegistersOpt::ID = 0;
 INITIALIZE_PASS(RISCVCompressRegistersOpt, "riscv-compress-registers",
                 RISCV_COMPRESS_REGISTERS_NAME, false, false)
 
+// Given an offset for a load/store, return the adjustment required to the base
+// register such that the address can be accessed with a compressible offset.
+// Return 0 if the offset is already compressible.
+int64_t
+getBaseAdjustForCompression (int64_t offset) {
+  if (isShiftedUInt<5, 2>(offset))
+    return 0;
+  return offset & ~(0b1111100);
+}
 // Find a single register which if compressible would allow the given
 // instruction to be compressed. If this is not the case return Register(0).
-static Register getRegPreventingCompression(const MachineInstr &MI) {
+static RegImmPair getRegPreventingCompression(const MachineInstr &MI) {
+  int64_t NewBaseAdjust = 0;
+
   switch (MI.getOpcode()) {
   default:
     break;
@@ -57,12 +68,15 @@ static Register getRegPreventingCompression(const MachineInstr &MI) {
     Register Base = MI.getOperand(1).getReg();
     // Load from stack pointer does not have a requirement for either of the
     // registers to be compressible.
+    //TODO handle uncompressible offset
     if (RISCV::SPRegClass.contains(Base))
       break;
 
     const MachineOperand &MOImm = MI.getOperand(2);
-    if (!MOImm.isImm() || !isShiftedUInt<5, 2>(MOImm.getImm()))
+    if (!MOImm.isImm())
       break;
+
+    NewBaseAdjust = getBaseAdjustForCompression (MOImm.getImm());
 
     Register Dest = MI.getOperand(0).getReg();
     bool DestCompressed = RISCV::GPRCRegClass.contains(Dest);
@@ -70,8 +84,8 @@ static Register getRegPreventingCompression(const MachineInstr &MI) {
 
     // For loads we can only change the base register since dest is defined
     // rather than used.
-    if (!BaseCompressed && DestCompressed)
-      return Base;
+    if ((!BaseCompressed || NewBaseAdjust) && DestCompressed)
+      return RegImmPair(Base, NewBaseAdjust);
 
     break;
   }
@@ -79,33 +93,38 @@ static Register getRegPreventingCompression(const MachineInstr &MI) {
     Register Base = MI.getOperand(1).getReg();
     // Store to stack pointer does not have a requirement for either of the
     // registers to be compressible.
+    //TODO handle uncompressible offset
     if (RISCV::SPRegClass.contains(Base))
       break;
 
     const MachineOperand &MOImm = MI.getOperand(2);
-    if (!MOImm.isImm() || !isShiftedUInt<5, 2>(MOImm.getImm()))
+    if (!MOImm.isImm())
       break;
+
+    NewBaseAdjust = getBaseAdjustForCompression (MOImm.getImm());
 
     Register Src = MI.getOperand(0).getReg();
     bool SrcCompressed = RISCV::GPRCRegClass.contains(Src);
     bool BaseCompressed = RISCV::GPRCRegClass.contains(Base);
 
-    if (!SrcCompressed && (BaseCompressed || Src == Base))
-      return Src;
-    if (!BaseCompressed && SrcCompressed)
-      return Base;
+    // Cannot resolve uncompressible offset if we are resolving src reg
+    if (!SrcCompressed && (BaseCompressed || Src == Base) && !NewBaseAdjust)
+      return RegImmPair(Src, NewBaseAdjust);
+    if ((!BaseCompressed || NewBaseAdjust) && SrcCompressed)
+      return RegImmPair(Base, NewBaseAdjust);
 
     break;
   }
   }
-  return Register(0);
+  return RegImmPair(Register(0), 0);
 }
 
 // Check all uses after FirstMI of the given register, determining which can be
-// compressed if that register was compressible, and returning which
-// compressible register is available to be used instead.
+// compressed if that register (and offset if applicable) was compressible, and
+// returning which compressible register is available to be used instead.
 static Register analyzeCompressibleUses(MachineBasicBlock &MBB,
-                                        MachineInstr &FirstMI, Register Reg,
+                                        MachineInstr &FirstMI,
+                                        RegImmPair RegImm,
                                         SmallVector<MachineInstr *, 8> &MIs) {
   RegScavenger RS;
   RS.enterBasicBlock(MBB);
@@ -115,21 +134,25 @@ static Register analyzeCompressibleUses(MachineBasicBlock &MBB,
        I != E; ++I) {
     MachineInstr &MI = *I;
 
-    // If any of the operands define the register our optimization would not be
-    // valid for this or further instructions.
-    bool IsRegDefined = false;
+    // If this register is uncompressed and any of the operands define it, this
+    // optimization would not be valid for this or further instructions. If the
+    // register is already compressed then a new base register could still be
+    // introduced to optimize "lw a0,LargeOffset(a0)" to
+    // "lw a0,SmallOffest(NewBase)".
+    bool DefinesUncompReg = false;
     for (const MachineOperand &MO : MI.operands())
-      if (MO.isReg() && MO.getReg() == Reg && MO.isDef()) {
-        IsRegDefined = true;
+      if (MO.isReg() && MO.getReg() == RegImm.Reg && MO.isDef()
+          && MI.getOpcode() != RISCV::LW) {
+        DefinesUncompReg = true;
         break;
       }
-    if (IsRegDefined)
+    if (DefinesUncompReg)
       break;
 
     // Determine if this is an instruction which would benefit from using the
     // new register.
-    Register CandidateReg = getRegPreventingCompression(MI);
-    if (CandidateReg != Reg)
+    RegImmPair CandidateRegImm = getRegPreventingCompression(MI);
+    if (CandidateRegImm.Reg != RegImm.Reg || CandidateRegImm.Imm != RegImm.Imm)
       continue;
 
     // Advance tracking since the value in the new register must be live for
@@ -139,7 +162,12 @@ static Register analyzeCompressibleUses(MachineBasicBlock &MBB,
     MIs.push_back(&MI);
   }
 
-  if (MIs.size() < 2)
+  // Adjusting the base requires an uncompressed addi instruction, therefore 3
+  // uses are required for a code size reduction (2 uses would break even on
+  // code size whilst adding an unnecessary instruction). If no adjustment is
+  // required then only a c.addi is needed to copy the register and 2 uses would
+  // be required for a code size reduction.
+  if (MIs.size() < 2 || (RegImm.Imm != 0 && MIs.size() < 3))
     return Register(0);
 
   // Find a compressible register which will be available from the first
@@ -151,15 +179,31 @@ static Register analyzeCompressibleUses(MachineBasicBlock &MBB,
 }
 
 // Update uses of the old register in the given instruction to the new register.
-static bool updateOperands(MachineInstr &MI, Register OldReg, Register NewReg) {
-  bool Updated = false;
+// Return false if no further instructions should be updated.
+static bool updateOperands(MachineInstr &MI, RegImmPair OldRegImm, Register NewReg) {
+  bool UpdatesAllowed = true;
+
+  // Update registers
   for (MachineOperand &MO : MI.operands())
-    if (MO.isReg() && MO.getReg() == OldReg) {
+    if (MO.isReg() && MO.getReg() == OldRegImm.Reg) {
+      if (MO.isReg() && MO.getReg() == OldRegImm.Reg && MO.isDef()) {
+        assert (MI.getOpcode() == RISCV::LW);
+        // Don't allow any more updates after optimizing LW where OldReg is
+        // defined and don't update this register.
+        UpdatesAllowed = false;
+        continue;
+      }
+      // Update reg
       MO.setReg(NewReg);
-      Updated = true;
     }
 
-  return Updated;
+  // Update offset
+  if (MI.getOpcode() == RISCV::LW || MI.getOpcode() == RISCV::SW) {
+    MachineOperand &MOImm = MI.getOperand(2);
+    MOImm.setImm(MOImm.getImm() & (0b1111100));
+  }
+
+  return UpdatesAllowed;
 }
 
 bool RISCVCompressRegistersOpt::runOnMachineFunction(MachineFunction &Fn) {
@@ -170,6 +214,7 @@ bool RISCVCompressRegistersOpt::runOnMachineFunction(MachineFunction &Fn) {
   const RISCVInstrInfo &TII = *STI.getInstrInfo();
 
   // This optimization only makes sense if compressed instructions are emitted.
+  //TODO check size optimization level.
   if (!STI.hasStdExtC())
     return false;
 
@@ -177,28 +222,29 @@ bool RISCVCompressRegistersOpt::runOnMachineFunction(MachineFunction &Fn) {
     LLVM_DEBUG(dbgs() << "MBB: " << MBB.getName() << "\n");
     for (MachineInstr &MI : MBB) {
       // Determine if this instruction would otherwise be compressed if not for
-      // an uncompressible register.
-      Register Reg = getRegPreventingCompression(MI);
-      if (!Reg)
+      // an uncompressible register or offset.
+      RegImmPair RegImm = getRegPreventingCompression(MI);
+      if (!RegImm.Reg && RegImm.Imm == 0)
         continue;
 
       // Determine if there is a set of instructions for which replacing this
       // register with a compressed register is possible and will allow
       // compression.
       SmallVector<MachineInstr *, 8> MIs;
-      Register NewReg = analyzeCompressibleUses(MBB, MI, Reg, MIs);
+      Register NewReg = analyzeCompressibleUses(MBB, MI, RegImm, MIs);
       if (!NewReg)
         continue;
 
-      // Build a copy to the compressed register.
+      assert(isInt<12>(RegImm.Imm));
       BuildMI(MBB, MI, MI.getDebugLoc(), TII.get(RISCV::ADDI), NewReg)
-          .addReg(Reg)
-          .addImm(0);
+        .addReg(RegImm.Reg)
+        .addImm(RegImm.Imm);
 
       // Update the set of instructions to use the compressed register instead.
       // These instructions should now be compressible.
       for (MachineInstr *UpdateMI : MIs)
-        updateOperands(*UpdateMI, Reg, NewReg);
+        if (!updateOperands(*UpdateMI, RegImm, NewReg))
+          break;
     }
   }
   return true;
