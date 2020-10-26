@@ -65,18 +65,23 @@ static RegImmPair getRegPreventingCompression(const MachineInstr &MI) {
   default:
     break;
   case RISCV::LW: {
-    Register Base = MI.getOperand(1).getReg();
-    // Load from stack pointer does not have a requirement for either of the
-    // registers to be compressible.
-    //TODO handle uncompressible offset
-    if (RISCV::SPRegClass.contains(Base))
-      break;
-
     const MachineOperand &MOImm = MI.getOperand(2);
     if (!MOImm.isImm())
       break;
 
-    NewBaseAdjust = getBaseAdjustForCompression (MOImm.getImm());
+    int64_t Offset = MOImm.getImm();
+
+    NewBaseAdjust = getBaseAdjustForCompression (Offset);
+
+    Register Base = MI.getOperand(1).getReg();
+    // Load from stack pointer does not have a requirement for either of the
+    // registers to be compressible and the offset can be a 6 bit immediate
+    // scaled by 4.
+    if (RISCV::SPRegClass.contains(Base)) {
+      if (!isShiftedUInt<6,2>(Offset) && NewBaseAdjust)
+        return RegImmPair(Base, NewBaseAdjust);
+      break;
+    }
 
     Register Dest = MI.getOperand(0).getReg();
     bool DestCompressed = RISCV::GPRCRegClass.contains(Dest);
@@ -90,18 +95,23 @@ static RegImmPair getRegPreventingCompression(const MachineInstr &MI) {
     break;
   }
   case RISCV::SW: {
-    Register Base = MI.getOperand(1).getReg();
-    // Store to stack pointer does not have a requirement for either of the
-    // registers to be compressible.
-    //TODO handle uncompressible offset
-    if (RISCV::SPRegClass.contains(Base))
-      break;
-
     const MachineOperand &MOImm = MI.getOperand(2);
     if (!MOImm.isImm())
       break;
 
-    NewBaseAdjust = getBaseAdjustForCompression (MOImm.getImm());
+    int64_t Offset = MOImm.getImm();
+
+    NewBaseAdjust = getBaseAdjustForCompression (Offset);
+
+    Register Base = MI.getOperand(1).getReg();
+    // Store to stack pointer does not have a requirement for either of the
+    // registers to be compressible and the offset can be a 6 bit immediate
+    // scaled by 4.
+    if (RISCV::SPRegClass.contains(Base)) {
+      if (!isShiftedUInt<6,2>(Offset) && NewBaseAdjust)
+        return RegImmPair(Base, NewBaseAdjust);
+      break;
+    }
 
     Register Src = MI.getOperand(0).getReg();
     bool SrcCompressed = RISCV::GPRCRegClass.contains(Src);
