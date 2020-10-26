@@ -217,14 +217,13 @@ static bool updateOperands(MachineInstr &MI, RegImmPair OldRegImm, Register NewR
 }
 
 bool RISCVCompressRegistersOpt::runOnMachineFunction(MachineFunction &Fn) {
-  if (skipFunction(Fn.getFunction()))
+  if (skipFunction(Fn.getFunction()) || !Fn.getFunction().hasOptSize())
     return false;
 
   const RISCVSubtarget &STI = Fn.getSubtarget<RISCVSubtarget>();
   const RISCVInstrInfo &TII = *STI.getInstrInfo();
 
   // This optimization only makes sense if compressed instructions are emitted.
-  //TODO check size optimization level.
   if (!STI.hasStdExtC())
     return false;
 
