@@ -1,4 +1,4 @@
-//===-- save_3_0.S - save up to 12 callee-saved registers -----------------===//
+//===-- save.S - save up to 12 callee-saved registers ---------------------===//
 //
 // Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
 // See https://llvm.org/LICENSE.txt for license information.
@@ -23,14 +23,14 @@ __riscv_save_12:
   STORE  s11, (3*STRIDE)(sp)
   j      .Lriscv_save_11_8
 
-	.globl  __riscv_save_11
-	.type   __riscv_save_11,@function
-	.globl  __riscv_save_10
-	.type   __riscv_save_10,@function
-	.globl  __riscv_save_9
-	.type   __riscv_save_9,@function
-	.globl  __riscv_save_8
-	.type   __riscv_save_8,@function
+  .globl  __riscv_save_11
+  .type   __riscv_save_11,@function
+  .globl  __riscv_save_10
+  .type   __riscv_save_10,@function
+  .globl  __riscv_save_9
+  .type   __riscv_save_9,@function
+  .globl  __riscv_save_8
+  .type   __riscv_save_8,@function
 __riscv_save_11:
 __riscv_save_10:
 __riscv_save_9:
@@ -44,14 +44,14 @@ __riscv_save_8:
   STORE  s7,  (7*STRIDE)(sp)
   j      .Lriscv_save_7_4
 
-	.globl  __riscv_save_7
-	.type   __riscv_save_7,@function
-	.globl  __riscv_save_6
-	.type   __riscv_save_6,@function
-	.globl  __riscv_save_5
-	.type   __riscv_save_5,@function
-	.globl  __riscv_save_4
-	.type   __riscv_save_4,@function
+  .globl  __riscv_save_7
+  .type   __riscv_save_7,@function
+  .globl  __riscv_save_6
+  .type   __riscv_save_6,@function
+  .globl  __riscv_save_5
+  .type   __riscv_save_5,@function
+  .globl  __riscv_save_4
+  .type   __riscv_save_4,@function
 __riscv_save_7:
 __riscv_save_6:
 __riscv_save_5:
@@ -70,14 +70,14 @@ __riscv_save_4:
   sub    sp, sp, t1
   jr     t0
 
-	.globl  __riscv_save_3
-	.type   __riscv_save_3,@function
-	.globl  __riscv_save_2
-	.type   __riscv_save_2,@function
-	.globl  __riscv_save_1
-	.type   __riscv_save_1,@function
-	.globl  __riscv_save_0
-	.type   __riscv_save_0,@function
+  .globl  __riscv_save_3
+  .type   __riscv_save_3,@function
+  .globl  __riscv_save_2
+  .type   __riscv_save_2,@function
+  .globl  __riscv_save_1
+  .type   __riscv_save_1,@function
+  .globl  __riscv_save_0
+  .type   __riscv_save_0,@function
 __riscv_save_3:
 __riscv_save_2:
 __riscv_save_1:

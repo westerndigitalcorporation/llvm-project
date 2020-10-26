@@ -557,6 +557,7 @@ set(powerpc64le_SOURCES ${powerpc64_SOURCES})
 set(riscv_SOURCES
   riscv/save.S
   riscv/restore.S
+  riscv/restore_tailcall.S
   ${GENERIC_SOURCES}
   ${GENERIC_TF_SOURCES}
 )
