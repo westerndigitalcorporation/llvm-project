@@ -339,6 +339,9 @@ static const Value *getNoopInput(const Value *V,
       ArrayRef<unsigned> ExtractLoc = EVI->getIndices();
       ValLoc.append(ExtractLoc.rbegin(), ExtractLoc.rend());
       NoopInput = Op;
+    } else if ((isa<SExtInst>(I) || isa<ZExtInst>(I) || isa<FPExtInst>(I))
+               && TLI.isExtFree(I)) {
+      NoopInput = Op;
     }
     // Terminate if we couldn't find anything to look through.
     if (!NoopInput)
@@ -554,6 +557,72 @@ bool llvm::isInTailCallPosition(const CallBase &Call, const TargetMachine &TM) {
       F, &Call, Ret, *TM.getSubtargetImpl(*F)->getTargetLowering());
 }
 
+static bool canIgnoreSExtZExtOnTailCall (const Instruction *I,
+                                         const TargetLoweringBase &TLI)
+{
+  assert (isa<CallInst>(I) && "Expected a CallInst");
+
+  // Drop sext and zext return attributes if the result is not used.
+  // This enables tail calls for code like:
+  //
+  // define void @caller() {
+  // entry:
+  //   %unused_result = tail call zeroext i1 @callee()
+  //   br label %retlabel
+  // retlabel:
+  //   ret void
+  // }
+  if (I->use_empty ())
+    return true;
+
+  // If we have a single use of the return value from the tail call, and
+  // that use is a ZExt or SExt, and, if that using extension is actually
+  // free (as the tail call's extension is enough), then we can ignore the
+  // extension on the tail call.  This will catch code like this:
+  //
+  // define dso_local i32 @some_func() local_unnamed_addr #0 {
+  // entry:
+  //   %call = tail call zeroext i8 @other_func() #2
+  //   %conv = zext i8 %call to i32
+  //   ret i32 %conv
+  // }
+  //
+  // On targets like RISC-V the zext instruction is not needed (is free) as
+  // the RISC-V ABI states that the i8 returned by 'other_func' must be
+  // zero extended to i32.
+  Instruction *UserI = nullptr;
+  for (const Use &U : I->uses()) {
+    // If there is more than one user of the result from the tail call then
+    // we will reach here with UserI set.  In this case set UserI back to
+    // nullptr and break out of the loop.
+    if (UserI != nullptr) {
+      UserI = nullptr;
+      break;
+    }
+    UserI = cast<Instruction>(U.getUser());
+  }
+
+  // If we have a single user of the result from the tail call, and the
+  // user is either a zero or sign extend instruction, then...
+  if (UserI != nullptr && (isa<ZExtInst>(UserI) || isa<SExtInst>(UserI))) {
+    // If the call instruction I is performing the same type of zero or
+    // sign extension (as described by its attributes), and if the
+    // extension instruction is free, then...
+    auto attr = isa<ZExtInst>(UserI) ? Attribute::ZExt : Attribute::SExt;
+    const CallInst *TheCall = dyn_cast<CallInst>(I);
+    if (TheCall->getAttributes().hasAttribute(AttributeList::ReturnIndex, attr)
+        && TLI.isExtFree (UserI)) {
+      // We are safe to ignore the zero or sign extension on the call
+      // instruction when checking the attributes for tail call analysis.
+      return true;
+    }
+  }
+
+  // In all other cases SExt and ZExt attributes on a tail call are
+  // important.
+  return false;
+}
+
 bool llvm::attributesPermitTailCall(const Function *F, const Instruction *I,
                                     const ReturnInst *Ret,
                                     const TargetLoweringBase &TLI,
@@ -594,17 +663,7 @@ bool llvm::attributesPermitTailCall(const Function *F, const Instruction *I,
     CalleeAttrs.removeAttribute(Attribute::SExt);
   }
 
-  // Drop sext and zext return attributes if the result is not used.
-  // This enables tail calls for code like:
-  //
-  // define void @caller() {
-  // entry:
-  //   %unused_result = tail call zeroext i1 @callee()
-  //   br label %retlabel
-  // retlabel:
-  //   ret void
-  // }
-  if (I->use_empty()) {
+  if (canIgnoreSExtZExtOnTailCall (I, TLI)) {
     CalleeAttrs.removeAttribute(Attribute::SExt);
     CalleeAttrs.removeAttribute(Attribute::ZExt);
   }
