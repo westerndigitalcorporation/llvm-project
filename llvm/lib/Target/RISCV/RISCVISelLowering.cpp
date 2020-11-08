@@ -351,6 +351,58 @@ bool RISCVTargetLowering::isZExtFree(SDValue Val, EVT VT2) const {
   return TargetLowering::isZExtFree(Val, VT2);
 }
 
+// Return true if the zero-extend or sign-extend instruction I is "free",
+// that is will require no assembler instructions to implement.
+//
+// Any instruction type can be passed in for I, any invalid types will
+// result in false being returned.
+//
+// Currently a sign or zero extension is free only if the input value comes
+// from a call instruction, and the call will have performed a suitable
+// sign or zero extension as part of the RISC-V ABI.
+bool RISCVTargetLowering::isExtFreeImplInner(const Instruction *I) const {
+  // Check the instruction type.
+  if (!(isa<ZExtInst>(I) || isa<SExtInst>(I)))
+    return false;
+
+  // Figure out the size of the general registers.
+  unsigned XLen = Subtarget.is64Bit() ? 64 : 32;
+
+  // If operand 0 of the extension comes from a call, then this
+  // extension might be provided for free.
+  if (!isa<CallInst>(I->getOperand(0)))
+    return false;
+  const CallInst *TheCall = dyn_cast<CallInst>(I->getOperand(0));
+
+  // Check that the size the instruction I is extending to the exact size
+  // of the general purpose registers, and that the call is returning a
+  // result no bigger than the general purpose registers.  If these
+  // conditions hold then the call will extend to the size of a general
+  // purpose registers (thanks to the ABI).
+  unsigned CallResultSize = I->getOperand(0)->getType()->getPrimitiveSizeInBits();
+  unsigned ExtendedSize = I->getType()->getPrimitiveSizeInBits();
+  if (ExtendedSize != XLen || CallResultSize > ExtendedSize)
+    return false;
+
+  // Finally, check that the call is marked with the correct extension
+  // attribute, this catches cases where the call returns an unsigned value
+  // while the extension instruction is actually signed, or vice-versa.
+  auto attr = isa<ZExtInst>(I) ? Attribute::ZExt : Attribute::SExt;
+  if (!TheCall->getAttributes().hasAttribute(AttributeList::ReturnIndex, attr))
+    return false;
+
+  // If we get here then the extension instruction I should be free.
+  return true;
+}
+
+// Override isExtFreeImpl, just calls isExtFreeImplInner or the base class
+// implementation of isExtFreeImpl.
+bool RISCVTargetLowering::isExtFreeImpl(const Instruction *I) const {
+  if (isExtFreeImplInner (I))
+    return true;
+  return TargetLowering::isExtFreeImpl(I);
+}
+
 bool RISCVTargetLowering::isSExtCheaperThanZExt(EVT SrcVT, EVT DstVT) const {
   return Subtarget.is64Bit() && SrcVT == MVT::i32 && DstVT == MVT::i64;
 }
