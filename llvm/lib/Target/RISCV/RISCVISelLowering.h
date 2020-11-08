@@ -73,6 +73,8 @@ public:
   bool isTruncateFree(Type *SrcTy, Type *DstTy) const override;
   bool isTruncateFree(EVT SrcVT, EVT DstVT) const override;
   bool isZExtFree(SDValue Val, EVT VT2) const override;
+  bool isExtFreeImpl(const Instruction *I) const override;
+  bool isExtFreeImplInner(const Instruction *I) const;
   bool isSExtCheaperThanZExt(EVT SrcVT, EVT DstVT) const override;
   bool isFPImmLegal(const APFloat &Imm, EVT VT,
                     bool ForCodeSize) const override;
