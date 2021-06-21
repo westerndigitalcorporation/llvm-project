@@ -4039,6 +4039,9 @@ bool CompilerInvocation::ParseLangArgs(LangOptions &Opts, ArgList &Args,
     }
   }
 
+  // RISC-V overlay functions support
+  Opts.RISCVOverlayFunctions = Args.hasArg(OPT_fcomrv);
+
   return Diags.getNumErrors() == NumErrorsBefore;
 }
 
@@ -4439,6 +4442,9 @@ bool CompilerInvocation::CreateFromArgsImpl(
   // Store the command-line for using in the CodeView backend.
   Res.getCodeGenOpts().Argv0 = Argv0;
   Res.getCodeGenOpts().CommandLineArgs = CommandLineArgs;
+
+  // RISC-V overlay functions support
+  LangOpts.RISCVOverlayFunctions = Args.hasArg(OPT_fcomrv);
 
   FixupInvocation(Res, Diags, Args, DashX);
 

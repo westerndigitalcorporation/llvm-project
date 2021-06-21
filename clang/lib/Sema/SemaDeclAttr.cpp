@@ -2030,6 +2030,28 @@ static void handleCmseNSEntryAttr(Sema &S, Decl *D, const ParsedAttr &AL) {
   D->addAttr(::new (S.Context) CmseNSEntryAttr(S.Context, AL));
 }
 
+static void handleRISCVOverlayCallAttr(Sema &S, Decl *D, const ParsedAttr &AL) {
+  if (!isFunctionOrMethod(D)) {
+    S.Diag(D->getLocation(), diag::warn_attribute_wrong_decl_type)
+        << AL << ExpectedFunctionOrMethod;
+    return;
+  }
+
+  const auto *FD = cast<FunctionDecl>(D);
+  if (!FD->isExternallyVisible()) {
+    S.Diag(AL.getLoc(), diag::err_overlaycall_static);
+    AL.setInvalid();
+    return;
+  }
+
+  // overlaycall implies noinline
+  Attr *A = ::new(S.Context) NoInlineAttr(S.Context, AL);
+  A->setImplicit(true);
+  D->addAttr(A);
+
+  handleSimpleAttribute<RISCVOverlayCallAttr>(S, D, AL);
+}
+
 static void handleNakedAttr(Sema &S, Decl *D, const ParsedAttr &AL) {
   if (AL.isDeclspecAttribute()) {
     const auto &Triple = S.getASTContext().getTargetInfo().getTriple();
@@ -8063,6 +8085,9 @@ static void ProcessDeclAttribute(Sema &S, Scope *scope, Decl *D,
   case ParsedAttr::AT_CmseNSEntry:
     handleCmseNSEntryAttr(S, D, AL);
     break;
+  case ParsedAttr::AT_RISCVOverlayCall:
+    handleRISCVOverlayCallAttr(S, D, AL);
+    break;
   case ParsedAttr::AT_StdCall:
   case ParsedAttr::AT_CDecl:
   case ParsedAttr::AT_FastCall:
@@ -8276,6 +8301,15 @@ static void ProcessDeclAttribute(Sema &S, Scope *scope, Decl *D,
 
   case ParsedAttr::AT_ArmBuiltinAlias:
     handleArmBuiltinAliasAttr(S, D, AL);
+    break;
+
+  case ParsedAttr::AT_RISCVOverlayData:
+    if (!S.getLangOpts().RISCVOverlayFunctions) {
+      AL.setInvalid();
+      S.Diag(AL.getLoc(), diag::err_overlaydata_unsupported);
+      break;
+    }
+    D->addAttr(::new (S.Context) RISCVOverlayDataAttr(S.Context, AL));
     break;
 
   case ParsedAttr::AT_AcquireHandle:
@@ -8558,6 +8592,19 @@ void Sema::ProcessDeclAttributes(Scope *S, Decl *D, const Declarator &PD) {
 
   // Apply additional attributes specified by '#pragma clang attribute'.
   AddPragmaAttributes(S, D);
+
+  // Depending on language options try and add the RISCVOverlayCall attribute
+  // to every function. This won't always be appropriate (eg static functions)
+  // but that will be handled later.
+  if (Context.getTargetInfo().hasDefaultOverlayCall()) {
+    Attr *OverlayAttr =
+        ::new(Context) RISCVOverlayCallAttr(Context, D->getSourceRange());
+    Attr *NoInline =
+        ::new(Context) NoInlineAttr(Context, D->getSourceRange());
+
+    D->addAttr(OverlayAttr);
+    D->addAttr(NoInline);
+  }
 }
 
 /// Is the given declaration allowed to use a forbidden type?

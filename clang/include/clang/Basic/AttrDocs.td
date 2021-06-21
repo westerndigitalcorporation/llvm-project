@@ -2132,6 +2132,20 @@ Version 1.10.
   }];
 }
 
+def RISCVOverlayDocs : Documentation {
+  let Category = DocCatFunction;
+  let Heading = "overlaycall, overlaydata (RISCV)";
+  let Content = [{
+``__attribute__((overlaycall))`` indicates that a function resides in an
+overlay and therefore any calls to or from that function must be handled
+through the overlay engine.
+
+``__attribute__((overlaydata))`` is used to mark global constants and signifies
+that the global is in an overlay and can only be accessed using the overlay
+engine.
+  }];
+}
+
 def AVRInterruptDocs : Documentation {
   let Category = DocCatFunction;
   let Heading = "interrupt (AVR)";

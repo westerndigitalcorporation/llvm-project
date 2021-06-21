@@ -118,6 +118,11 @@ def SharedVar : SubsetSubject<Var,
 def GlobalVar : SubsetSubject<Var,
                              [{S->hasGlobalStorage()}], "global variables">;
 
+def GlobalConst : SubsetSubject<Var,
+                               [{S->hasGlobalStorage() &&
+                                 S->getType().isConstQualified()}],
+                               "global constants">;
+
 def InlineFunction : SubsetSubject<Function,
                              [{S->isInlineSpecified()}], "inline functions">;
 
@@ -338,6 +343,9 @@ def ObjCNonFragileRuntime
 
 // Language option for CMSE extensions
 def Cmse : LangOpt<"Cmse">;
+
+// Language option for Overlay functions
+def RISCVOverlayFunctions : LangOpt<"RISCVOverlayFunctions">;
 
 // Defines targets for target-specific attributes. Empty lists are unchecked.
 class TargetSpec {
@@ -1774,6 +1782,22 @@ def RISCVInterrupt : InheritableAttr, TargetSpecificAttr<TargetRISCV> {
                            1>];
   let ParseKind = "Interrupt";
   let Documentation = [RISCVInterruptDocs];
+}
+
+// This is not marked as a TargetSpecificAttr because that would trigger
+// an 'attribute ignored' warning, but we want to check it explicitly and
+// trigger an error.
+def RISCVOverlayCall : InheritableAttr {
+  let Spellings = [GCC<"overlaycall">];
+  let Subjects = SubjectList<[Function]>;
+  let LangOpts = [RISCVOverlayFunctions];
+  let Documentation = [RISCVOverlayDocs];
+}
+
+def RISCVOverlayData : TypeAttr, TargetSpecificAttr<TargetRISCV> {
+  let Spellings = [GCC<"overlaydata">];
+  let Subjects = SubjectList<[GlobalConst]>;
+  let Documentation = [RISCVOverlayDocs];
 }
 
 // This is not a TargetSpecificAttr so that is silently accepted and

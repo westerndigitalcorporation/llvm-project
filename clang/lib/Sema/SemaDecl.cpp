@@ -3289,6 +3289,17 @@ bool Sema::MergeFunctionDecl(FunctionDecl *New, NamedDecl *&OldD,
     }
   }
 
+  bool NewIsOverlayCall = New->hasAttr<RISCVOverlayCallAttr>();
+  bool OldIsOverlayCall = Old->hasAttr<RISCVOverlayCallAttr>();
+  if (!Context.getTargetInfo().hasDefaultOverlayCall()) {
+    if (NewIsOverlayCall != OldIsOverlayCall) {
+      Diag(New->getLocation(), diag::err_overlaycall_mismatch)
+        << New << OldIsOverlayCall;
+      notePreviousDefinition(Old, New->getLocation());
+      return true;
+    }
+  }
+
   if (New->hasAttr<InternalLinkageAttr>() &&
       !Old->hasAttr<InternalLinkageAttr>()) {
     Diag(New->getLocation(), diag::err_internal_linkage_redeclaration)

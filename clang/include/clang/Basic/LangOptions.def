@@ -419,6 +419,8 @@ ENUM_LANGOPT(ExtendIntArgs, ExtendArgsKind, 1, ExtendArgsKind::ExtendTo32,
              "Controls how scalar integer arguments are extended in calls "
              "to unprototyped and varargs functions")
 
+LANGOPT(RISCVOverlayFunctions, 1, 0, "RISC-V overlay functions support")
+
 #undef LANGOPT
 #undef COMPATIBLE_LANGOPT
 #undef BENIGN_LANGOPT
