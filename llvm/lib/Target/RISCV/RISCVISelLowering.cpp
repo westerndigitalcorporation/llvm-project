@@ -2452,9 +2452,20 @@ static SDValue getTargetNode(JumpTableSDNode *N, SDLoc DL, EVT Ty,
 
 template <class NodeTy>
 SDValue RISCVTargetLowering::getAddr(NodeTy *N, SelectionDAG &DAG,
-                                     bool IsLocal) const {
+                                     bool IsLocal, unsigned SpecialMOLo,
+                                     unsigned SpecialMOHi) const {
   SDLoc DL(N);
   EVT Ty = getPointerTy(DAG.getDataLayout());
+
+  // Overlay calls are special. They are unaffected by -fpic or the code
+  // model, so they're handled first here.
+  if (SpecialMOLo || SpecialMOHi) {
+    assert(SpecialMOLo && SpecialMOHi && "MOFlags only on one half?");
+    SDValue AddrLo = getTargetNode(N, DL, Ty, DAG, SpecialMOLo);
+    SDValue AddrHi = getTargetNode(N, DL, Ty, DAG, SpecialMOHi);
+    SDValue LoadHi = SDValue(DAG.getMachineNode(RISCV::LUI, DL, Ty, AddrHi), 0);
+    return SDValue(DAG.getMachineNode(RISCV::ADDI, DL, Ty, LoadHi, AddrLo), 0);
+  }
 
   if (isPositionIndependent()) {
     SDValue Addr = getTargetNode(N, DL, Ty, DAG, 0);
@@ -2501,7 +2512,30 @@ SDValue RISCVTargetLowering::lowerGlobalAddress(SDValue Op,
 
   const GlobalValue *GV = N->getGlobal();
   bool IsLocal = getTargetMachine().shouldAssumeDSOLocal(*GV->getParent(), GV);
-  SDValue Addr = getAddr(N, DAG, IsLocal);
+
+  // If we're loading a function address with the overlay-call attribute or
+  // referring to a GlobalVariable with the overlay-data attribute then the
+  // GlobalAddress must be modifier to refer to where the function resides
+  // in its overlay group.
+  unsigned LoFlags = 0, HiFlags = 0;
+  if (auto *F = dyn_cast<Function>(GV)) {
+    if (F->hasFnAttribute("overlay-call")) {
+      if (Offset != 0)
+        report_fatal_error ("Arithmetic on overlay tokens is not supported");
+      LoFlags = RISCVII::MO_OVLPLT_LO;
+      HiFlags = RISCVII::MO_OVLPLT_HI;
+    }
+  }
+  else if (auto *GVar = dyn_cast<GlobalVariable>(GV)) {
+    if (GVar->hasAttribute("overlay-data")) {
+      if (Offset != 0)
+        report_fatal_error ("Arithmetic on overlay tokens is not supported");
+      LoFlags = RISCVII::MO_OVL_LO;
+      LoFlags = RISCVII::MO_OVL_HI;
+    }
+  }
+
+  SDValue Addr = getAddr(N, DAG, IsLocal, LoFlags, HiFlags);
 
   // In order to maximise the opportunity for common subexpression elimination,
   // emit a separate ADD node for the global address offset instead of folding
@@ -7086,10 +7120,13 @@ static bool CC_RISCV_FastCC(unsigned ValNo, MVT ValVT, MVT LocVT,
 
   if (LocVT == MVT::i32 || LocVT == MVT::i64) {
     // X5 and X6 might be used for save-restore libcall.
+    // ComRV: Do not use X28, X29, X30 nor X31 for FastCC, since these will be
+    // reserved. FIXME: Add support for removing registers that are reserved
+    // from this list.
     static const MCPhysReg GPRList[] = {
         RISCV::X10, RISCV::X11, RISCV::X12, RISCV::X13, RISCV::X14,
-        RISCV::X15, RISCV::X16, RISCV::X17, RISCV::X7,  RISCV::X28,
-        RISCV::X29, RISCV::X30, RISCV::X31};
+        RISCV::X15, RISCV::X16, RISCV::X17, RISCV::X7/*,  RISCV::X28,
+        RISCV::X29, RISCV::X30, RISCV::X31*/};
     if (unsigned Reg = State.AllocateReg(GPRList)) {
       State.addLoc(CCValAssign::getReg(ValNo, ValVT, Reg, LocVT, LocInfo));
       return false;
@@ -7366,6 +7403,15 @@ bool RISCVTargetLowering::isEligibleForTailCallOptimization(
   if (Caller.hasFnAttribute("interrupt"))
     return false;
 
+  // Overlay function can never tailcall, nor can be tail called
+  if (Caller.hasFnAttribute("overlay-call"))
+    return false;
+  if (GlobalAddressSDNode *G = dyn_cast<GlobalAddressSDNode>(Callee)) {
+    if (auto *CalleeF = dyn_cast<Function>(G->getGlobal()))
+      if (CalleeF->hasFnAttribute("overlay-call"))
+        return false;
+  }
+
   // Do not tail call opt if the stack is used to pass parameters.
   if (CCInfo.getNextStackOffset() != 0)
     return false;
@@ -7631,22 +7677,40 @@ SDValue RISCVTargetLowering::LowerCall(CallLoweringInfo &CLI,
   // If the callee is a GlobalAddress/ExternalSymbol node, turn it into a
   // TargetGlobalAddress/TargetExternalSymbol node so that legalize won't
   // split it and then direct call can be matched by PseudoCALL.
+  bool isOVLCC = false;
+  bool isIndirect = false;
   if (GlobalAddressSDNode *S = dyn_cast<GlobalAddressSDNode>(Callee)) {
     const GlobalValue *GV = S->getGlobal();
 
     unsigned OpFlags = RISCVII::MO_CALL;
-    if (!getTargetMachine().shouldAssumeDSOLocal(*GV->getParent(), GV))
+    auto *F = dyn_cast<Function>(GV);
+    if ((F && F->hasFnAttribute("overlay-call")) ||
+        MF.getFunction().hasFnAttribute("overlay-call")) {
+      isOVLCC = true;
+      if (F && F->hasFnAttribute("overlay-call"))
+        OpFlags = RISCVII::MO_OVLCALL; /*overlay*/
+      else
+        OpFlags = RISCVII::MO_OVL2RESCALL; /*overlay to resident call*/
+    }
+    else if (!getTargetMachine().shouldAssumeDSOLocal(*GV->getParent(), GV))
       OpFlags = RISCVII::MO_PLT;
 
     Callee = DAG.getTargetGlobalAddress(GV, DL, PtrVT, 0, OpFlags);
   } else if (ExternalSymbolSDNode *S = dyn_cast<ExternalSymbolSDNode>(Callee)) {
     unsigned OpFlags = RISCVII::MO_CALL;
-
-    if (!getTargetMachine().shouldAssumeDSOLocal(*MF.getFunction().getParent(),
+    // In the case of the caller being an overlay function, make function calls
+    // use ovlcall (resident mode)
+    if (MF.getFunction().hasFnAttribute("overlay-call")) {
+      OpFlags = RISCVII::MO_OVL2RESCALL;
+      isOVLCC = true;
+    }
+    else if (!getTargetMachine().shouldAssumeDSOLocal(*MF.getFunction().getParent(),
                                                  nullptr))
       OpFlags = RISCVII::MO_PLT;
 
     Callee = DAG.getTargetExternalSymbol(S->getSymbol(), PtrVT, OpFlags);
+  } else {
+    isIndirect = true;
   }
 
   // The first call operand is the chain and the second is the target address.
@@ -7679,7 +7743,18 @@ SDValue RISCVTargetLowering::LowerCall(CallLoweringInfo &CLI,
     return DAG.getNode(RISCVISD::TAIL, DL, NodeTys, Ops);
   }
 
-  Chain = DAG.getNode(RISCVISD::CALL, DL, NodeTys, Ops);
+  // If this is an indirect function call and the caller is an overlaycall, then
+  // use an ovlcall_indirect node to indicate the call must go via the manager
+  // regardless of whether the callee is an ovlcall or not (will be either
+  // resident function or PLT stub)
+  if (isIndirect &&
+      MF.getFunction().hasFnAttribute("overlay-call")) {
+    Chain = DAG.getNode(RISCVISD::OVLCALL_INDIRECT, DL, NodeTys, Ops);
+  } else if (isOVLCC) {
+    Chain = DAG.getNode(RISCVISD::OVLCALL, DL, NodeTys, Ops);
+  } else {
+    Chain = DAG.getNode(RISCVISD::CALL, DL, NodeTys, Ops);
+  }
   DAG.addNoMergeSiteInfo(Chain.getNode(), CLI.NoMerge);
   Glue = Chain.getValue(1);
 
@@ -7993,6 +8068,8 @@ const char *RISCVTargetLowering::getTargetNodeName(unsigned Opcode) const {
   NODE_NAME_CASE(READ_CSR)
   NODE_NAME_CASE(WRITE_CSR)
   NODE_NAME_CASE(SWAP_CSR)
+  NODE_NAME_CASE(OVLCALL)
+  NODE_NAME_CASE(OVLCALL_INDIRECT)
   }
   // clang-format on
   return nullptr;

@@ -82,6 +82,15 @@ def riscv_read_cycle_wide : SDNode<"RISCVISD::READ_CYCLE_WIDE",
                                    SDT_RISCVReadCycleWide,
                                    [SDNPHasChain, SDNPSideEffect]>;
 
+// Nodes for other Calling Conventions
+def riscv_ovlcall   : SDNode<"RISCVISD::OVLCALL", SDT_RISCVCall,
+                             [SDNPHasChain, SDNPOptInGlue, SDNPOutGlue,
+                              SDNPVariadic]>;
+def riscv_ovlcall_indirect : SDNode<"RISCVISD::OVLCALL_INDIRECT",
+                                    SDT_RISCVCall,
+                                    [SDNPHasChain, SDNPOptInGlue,
+                                     SDNPOutGlue, SDNPVariadic]>;
+
 //===----------------------------------------------------------------------===//
 // Operand and SDNode transformation definitions.
 //===----------------------------------------------------------------------===//
@@ -1029,6 +1038,30 @@ def PseudoCALL : Pseudo<(outs), (ins call_symbol:$func), []> {
 
 def : Pat<(riscv_call tglobaladdr:$func), (PseudoCALL tglobaladdr:$func)>;
 def : Pat<(riscv_call texternalsym:$func), (PseudoCALL texternalsym:$func)>;
+
+// Overlay call handling
+let isCall = 1, Defs = [X1], isCodeGenOnly = 0, mayStore = 0, mayLoad = 0,
+    hasSideEffects = 0 in {
+  def PseudoOVLCALL : Pseudo<(outs), (ins call_symbol:$func), []> {
+    let AsmString = "ovlcall\t$func";
+  }
+  // It is not possible to do an indirect call with a plain "ovlcall" because
+  // the expansion depends on knowing whether or not the caller is in an
+  // overlay. These pseudo instructions are used instead and take a register
+  // operand instead of an immediate.
+  def PseudoOVLCALLIndirect : Pseudo<(outs), (ins GPR:$rs1), []> {
+    let AsmString = "ovlcall_indirect\t$rs1";
+  }
+}
+
+def : Pat<(riscv_ovlcall tglobaladdr:$func),  (PseudoOVLCALL tglobaladdr:$func)>;
+def : Pat<(riscv_ovlcall texternalsym:$func), (PseudoOVLCALL texternalsym:$func)>;
+
+// Indirect calls from overlay functions will explicitly use
+// RISCVISD::OVLCALL_INDIRECT
+def : Pat<(riscv_ovlcall_indirect GPR:$rs1),
+          (PseudoOVLCALLIndirect GPR:$rs1)>;
+
 
 def : Pat<(riscv_uret_flag), (URET X0, X0)>;
 def : Pat<(riscv_sret_flag), (SRET X0, X0)>;

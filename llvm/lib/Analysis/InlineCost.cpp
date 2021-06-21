@@ -2520,6 +2520,13 @@ Optional<InlineResult> llvm::getAttributeBasedInliningDecision(
   if (Callee->isPresplitCoroutine())
     return InlineResult::failure("unsplited coroutine call");
 
+  // Don't inline overlay functions, or inline into overlay functions
+  Function *Caller = Call.getCaller();
+  if (Caller->hasFnAttribute("overlay-call"))
+    return InlineResult::failure("caller is overlaycall");
+  if (Callee->hasFnAttribute("overlay-call"))
+    return InlineResult::failure("callee is overlaycall");
+
   // Never inline calls with byval arguments that does not have the alloca
   // address space. Since byval arguments can be replaced with a copy to an
   // alloca, the inlined code would need to be adjusted to handle that the
@@ -2545,7 +2552,6 @@ Optional<InlineResult> llvm::getAttributeBasedInliningDecision(
 
   // Never inline functions with conflicting attributes (unless callee has
   // always-inline attribute).
-  Function *Caller = Call.getCaller();
   if (!functionsHaveCompatibleAttributes(Caller, Callee, CalleeTTI, GetTLI))
     return InlineResult::failure("conflicting attributes");
 

@@ -352,6 +352,10 @@ public:
     VK_VE_TPOFF_HI32,  // symbol@tpoff_hi
     VK_VE_TPOFF_LO32,  // symbol@tpoff_lo
 
+    // A SymbolRef VK is needed in order to parse e.g. `.word foo@overlay_plt`
+    VK_RISCV_OVLPLT,         // overlay_plt
+    VK_RISCV_OVL,            // overlay
+
     VK_TPREL,
     VK_DTPREL
   };

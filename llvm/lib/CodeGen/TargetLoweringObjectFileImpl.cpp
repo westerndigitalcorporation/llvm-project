@@ -623,6 +623,19 @@ getELFSectionNameForGlobal(const GlobalObject *GO, SectionKind Kind,
     Name = getSectionPrefixForGlobal(Kind);
   }
 
+  // For overlay functions, replace the default section name with ".ovlinput"
+  if (isa<Function>(GO) &&
+      cast<Function>(GO)->hasFnAttribute("overlay-call"))
+    Name = ".ovlinput";
+
+  // For overlay data, also change the section prefix to ".ovlinput", since
+  // the overlay system mixes the two
+  if (isa<GlobalVariable>(GO) &&
+      cast<GlobalVariable>(GO)->hasAttribute("overlay-data")) {
+    assert(Name == ".rodata" && "non-constant ovldata?");
+    Name = ".ovlinput";
+  }
+
   bool HasPrefix = false;
   if (const auto *F = dyn_cast<Function>(GO)) {
     if (Optional<StringRef> Prefix = F->getSectionPrefix()) {
@@ -864,6 +877,14 @@ MCSection *TargetLoweringObjectFileELF::SelectSectionForGlobal(
       EmitUniqueSection = TM.getDataSections();
   }
   EmitUniqueSection |= GO->hasComdat();
+
+  if (Kind.isText() && isa<Function>(GO) &&
+      cast<Function>(GO)->hasFnAttribute("overlay-call"))
+    EmitUniqueSection = true;
+  if (isa<GlobalVariable>(GO) &&
+      cast<GlobalVariable>(GO)->hasAttribute("overlay-data"))
+    EmitUniqueSection = true;
+
   return selectELFSectionForGlobal(getContext(), GO, Kind, getMangler(), TM,
                                    Used.count(GO), EmitUniqueSection, Flags,
                                    &NextUniqueID);

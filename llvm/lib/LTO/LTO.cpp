@@ -1118,7 +1118,11 @@ Error LTO::runRegularLTO(AddStreamFn AddStream) {
         continue;
       GV->setUnnamedAddr(R.second.UnnamedAddr ? GlobalValue::UnnamedAddr::Global
                                               : GlobalValue::UnnamedAddr::None);
-      if (EnableLTOInternalization && R.second.Partition == 0)
+      bool isOverlayCall = false;
+      if (isa<Function>(GV) &&
+          cast<Function>(GV)->hasFnAttribute("overlay-call"))
+        isOverlayCall = true;
+      if (EnableLTOInternalization && R.second.Partition == 0 && !isOverlayCall)
         GV->setLinkage(GlobalValue::InternalLinkage);
     }
 

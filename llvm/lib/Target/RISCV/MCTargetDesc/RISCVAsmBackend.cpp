@@ -70,7 +70,14 @@ RISCVAsmBackend::getFixupKindInfo(MCFixupKind Kind) const {
       {"fixup_riscv_call", 0, 64, MCFixupKindInfo::FKF_IsPCRel},
       {"fixup_riscv_call_plt", 0, 64, MCFixupKindInfo::FKF_IsPCRel},
       {"fixup_riscv_relax", 0, 0, 0},
-      {"fixup_riscv_align", 0, 0, 0}};
+      {"fixup_riscv_align", 0, 0, 0},
+      {"fixup_riscv_ovl_hi20", 12, 20, 0},
+      {"fixup_riscv_ovl_lo12_i", 20, 12, 0},
+      {"fixup_riscv_ovl32", 0, 32, 0},
+      {"fixup_riscv_ovlplt_hi20", 12, 20, 0},
+      {"fixup_riscv_ovlplt_lo12_i", 20, 12, 0},
+      {"fixup_riscv_ovlplt32", 0, 32, 0},
+      };
   static_assert((array_lengthof(Infos)) == RISCV::NumTargetFixupKinds,
                 "Not all fixup kinds added to Infos array");
 

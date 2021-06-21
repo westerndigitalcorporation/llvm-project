@@ -2252,6 +2252,10 @@ Instruction *InstCombinerImpl::visitCallBase(CallBase &Call) {
     // this call must be unreachable, as the call is undefined.
     if ((CalleeF->getCallingConv() != Call.getCallingConv() &&
          !(CalleeF->getCallingConv() == llvm::CallingConv::C &&
+           Call.getFunction()->hasFnAttribute("overlay-call")) &&
+         !(Call.getCallingConv() == llvm::CallingConv::C &&
+           CalleeF->hasFnAttribute("overlay-call")) &&
+         !(CalleeF->getCallingConv() == llvm::CallingConv::C &&
            TargetLibraryInfoImpl::isCallingConvCCompatible(&Call)) &&
          !(Call.getCallingConv() == llvm::CallingConv::C &&
            TargetLibraryInfoImpl::isCallingConvCCompatible(CalleeF))) &&

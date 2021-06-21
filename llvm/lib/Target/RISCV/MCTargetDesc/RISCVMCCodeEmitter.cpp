@@ -56,6 +56,10 @@ public:
                           SmallVectorImpl<MCFixup> &Fixups,
                           const MCSubtargetInfo &STI) const;
 
+  unsigned expandFunctionCallOverlay(const MCInst &MI, raw_ostream &OS,
+                                     SmallVectorImpl<MCFixup> &Fixups,
+                                     const MCSubtargetInfo &STI) const;
+
   void expandAddTPRel(const MCInst &MI, raw_ostream &OS,
                       SmallVectorImpl<MCFixup> &Fixups,
                       const MCSubtargetInfo &STI) const;
@@ -149,6 +153,82 @@ void RISCVMCCodeEmitter::expandFunctionCall(const MCInst &MI, raw_ostream &OS,
   support::endian::write(OS, Binary, support::little);
 }
 
+unsigned
+RISCVMCCodeEmitter::expandFunctionCallOverlay(const MCInst &MI, raw_ostream &OS,
+                                              SmallVectorImpl<MCFixup> &Fixups,
+                                              const MCSubtargetInfo &STI) const {
+  MCInst TmpInst;
+  uint32_t Binary;
+  bool Relax = STI.getFeatureBits()[RISCV::FeatureRelax];
+
+  unsigned Opcode = MI.getOpcode();
+  unsigned NumInstrs = 0;
+  if (Opcode == RISCV::PseudoOVLCALL ||
+      Opcode == RISCV::PseudoOVLCALLIndirect) {
+    // OVLCALL -> LUI ; ADDI ; JALR
+    // Note: Fixups are added manually since they are needed at non-zero offsets
+    MCRegister Ra = RISCV::X1;
+    MCRegister Token = RISCV::X30;
+    MCRegister EntryPoint = RISCV::X31;
+
+    if (Opcode == RISCV::PseudoOVLCALL) {
+      // Extract the call symbol that should be targetted by this call.
+      assert(MI.getOperand(0).isExpr() && "Something has gone wrong?");
+      const RISCVMCExpr *RCallExpr = cast<RISCVMCExpr>(MI.getOperand(0).getExpr());
+      assert(RCallExpr->getSubExpr()->getKind() == MCExpr::SymbolRef);
+      const MCSymbolRefExpr *Sym = cast<MCSymbolRefExpr>(RCallExpr->getSubExpr());
+      bool isOVL = RCallExpr->getKind() == RISCVMCExpr::VK_RISCV_OVLCALL;
+      if (!isOVL && (RCallExpr->getKind() != RISCVMCExpr::VK_RISCV_OVL2RESCALL))
+        report_fatal_error("symbol used with 'ovlcall' must be marked with "
+                           "either @resident or @overlay");
+
+      // LUI
+      TmpInst = MCInstBuilder(RISCV::LUI).addReg(Token).addImm(0);
+      Binary = getBinaryCodeForInstr(TmpInst, Fixups, STI);
+      support::endian::write(OS, Binary, support::little);
+      NumInstrs++;
+      Fixups.push_back(MCFixup::create(0, Sym,
+                                       isOVL ? MCFixupKind(RISCV::fixup_riscv_ovl_hi20)
+                                             : MCFixupKind(RISCV::fixup_riscv_hi20),
+                                       MI.getLoc()));
+      if (Relax)
+        Fixups.push_back(MCFixup::create(0, MCConstantExpr::create(0, Ctx),
+                                         MCFixupKind(RISCV::fixup_riscv_relax),
+                                         MI.getLoc()));
+      // ADDI
+      TmpInst = MCInstBuilder(RISCV::ADDI).addReg(Token).addReg(Token).addImm(0);
+      Binary = getBinaryCodeForInstr(TmpInst, Fixups, STI);
+      support::endian::write(OS, Binary, support::little);
+      NumInstrs++;
+      Fixups.push_back(MCFixup::create(4, Sym,
+                                       isOVL ? MCFixupKind(RISCV::fixup_riscv_ovl_lo12_i)
+                                             : MCFixupKind(RISCV::fixup_riscv_lo12_i),
+                                       MI.getLoc()));
+      if (Relax)
+        Fixups.push_back(MCFixup::create(4, MCConstantExpr::create(0, Ctx),
+                                         MCFixupKind(RISCV::fixup_riscv_relax),
+                                         MI.getLoc()));
+    } else {
+      assert(Opcode == RISCV::PseudoOVLCALLIndirect);
+      MCRegister TargetReg = MI.getOperand(0).getReg();
+      // MV
+      TmpInst = MCInstBuilder(RISCV::ADDI).addReg(Token).addReg(TargetReg).addImm(0);
+      Binary = getBinaryCodeForInstr(TmpInst, Fixups, STI);
+      support::endian::write(OS, Binary, support::little);
+      NumInstrs++;
+    }
+
+    // JALR
+    TmpInst = MCInstBuilder(RISCV::JALR).addReg(Ra).addReg(EntryPoint).addImm(0);
+    Binary = getBinaryCodeForInstr(TmpInst, Fixups, STI);
+    support::endian::write(OS, Binary, support::little);
+    NumInstrs++;
+  } else
+    llvm_unreachable("Unexpected opcode!");
+
+  return NumInstrs;
+}
+
 // Expand PseudoAddTPRel to a simple ADD with the correct relocation.
 void RISCVMCCodeEmitter::expandAddTPRel(const MCInst &MI, raw_ostream &OS,
                                         SmallVectorImpl<MCFixup> &Fixups,
@@ -206,6 +286,12 @@ void RISCVMCCodeEmitter::encodeInstruction(const MCInst &MI, raw_ostream &OS,
       MI.getOpcode() == RISCV::PseudoJump) {
     expandFunctionCall(MI, OS, Fixups, STI);
     MCNumEmitted += 2;
+    return;
+  }
+
+  if (MI.getOpcode() == RISCV::PseudoOVLCALL ||
+      MI.getOpcode() == RISCV::PseudoOVLCALLIndirect) {
+    MCNumEmitted += expandFunctionCallOverlay(MI, OS, Fixups, STI);
     return;
   }
 
@@ -290,6 +376,12 @@ unsigned RISCVMCCodeEmitter::getImmOpValue(const MCInst &MI, unsigned OpNo,
     case RISCVMCExpr::VK_RISCV_Invalid:
     case RISCVMCExpr::VK_RISCV_32_PCREL:
       llvm_unreachable("Unhandled fixup kind!");
+    case RISCVMCExpr::VK_RISCV_OVLCALL:
+    case RISCVMCExpr::VK_RISCV_OVL2RESCALL:
+      // Overlay calls are expanded into multiple instructions with different
+      // fixups depending on the instruction sequence, so they aren't
+      // handled here.
+      return 0;
     case RISCVMCExpr::VK_RISCV_TPREL_ADD:
       // tprel_add is only used to indicate that a relocation should be emitted
       // for an add instruction used in TP-relative addressing. It should not be
@@ -354,6 +446,18 @@ unsigned RISCVMCCodeEmitter::getImmOpValue(const MCInst &MI, unsigned OpNo,
     case RISCVMCExpr::VK_RISCV_CALL_PLT:
       FixupKind = RISCV::fixup_riscv_call_plt;
       RelaxCandidate = true;
+      break;
+    case RISCVMCExpr::VK_RISCV_OVL_LO:
+      FixupKind = RISCV::fixup_riscv_ovl_lo12_i;
+      break;
+    case RISCVMCExpr::VK_RISCV_OVL_HI:
+      FixupKind = RISCV::fixup_riscv_ovl_hi20;
+      break;
+    case RISCVMCExpr::VK_RISCV_OVLPLT_LO:
+      FixupKind = RISCV::fixup_riscv_ovlplt_lo12_i;
+      break;
+    case RISCVMCExpr::VK_RISCV_OVLPLT_HI:
+      FixupKind = RISCV::fixup_riscv_ovlplt_hi20;
       break;
     }
   } else if (Kind == MCExpr::SymbolRef &&

@@ -42,6 +42,9 @@ enum NodeType : unsigned {
   TAIL,
   // Multiply high for signedxunsigned.
   MULHSU,
+  // CALL equivalent nodes for overlay calls
+  OVLCALL,
+  OVLCALL_INDIRECT,
   // RV64I shifts, directly matching the semantics of the named RISC-V
   // instructions.
   SLLW,
@@ -489,7 +492,8 @@ private:
                          bool IsRet, CallLoweringInfo *CLI) const;
 
   template <class NodeTy>
-  SDValue getAddr(NodeTy *N, SelectionDAG &DAG, bool IsLocal = true) const;
+  SDValue getAddr(NodeTy *N, SelectionDAG &DAG, bool IsLocal = true,
+                  unsigned SpecialMOLo = 0, unsigned SpecialMOHi = 0) const;
 
   SDValue getStaticTLSAddr(GlobalAddressSDNode *N, SelectionDAG &DAG,
                            bool UseGOT) const;

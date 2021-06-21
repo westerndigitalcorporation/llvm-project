@@ -49,6 +49,9 @@ public:
 
   bool runOnMachineFunction(MachineFunction &MF) override;
 
+  const MCExpr *lowerConstant(const Constant *CV) override;
+  void SetupMachineFunction(MachineFunction &MF) override;
+
   void emitInstruction(const MachineInstr *MI) override;
 
   bool PrintAsmOperand(const MachineInstr *MI, unsigned OpNo,
@@ -194,6 +197,36 @@ void RISCVAsmPrinter::emitAttributes() {
   RISCVTargetStreamer &RTS =
       static_cast<RISCVTargetStreamer &>(*OutStreamer->getTargetStreamer());
   RTS.emitTargetAttributes(*STI);
+}
+
+const MCExpr *RISCVAsmPrinter::lowerConstant(const Constant *CV) {
+  if (auto *Fn = dyn_cast<Function>(CV)) {
+    if (Fn->hasFnAttribute("overlay-call")) {
+      const MCSymbolRefExpr *Expr =
+          MCSymbolRefExpr::create(getSymbol(cast<GlobalValue>(CV)),
+                                  MCSymbolRefExpr::VK_RISCV_OVLPLT, OutContext);
+      return Expr;
+    }
+  }
+  if (auto *GV = dyn_cast<GlobalVariable>(CV)) {
+    if (GV->hasAttribute("overlay-data")) {
+      const MCSymbolRefExpr *Expr =
+          MCSymbolRefExpr::create(getSymbol(cast<GlobalValue>(CV)),
+                                  MCSymbolRefExpr::VK_RISCV_OVL, OutContext);
+      return Expr;
+    }
+  }
+  return AsmPrinter::lowerConstant(CV);
+}
+void RISCVAsmPrinter::SetupMachineFunction(MachineFunction &MF) {
+  // Set the current MCSubtargetInfo to a copy which has the correct
+  // feature bits for the current MachineFunction
+  MCSubtargetInfo &NewSTI =
+    OutStreamer->getContext().getSubtargetCopy(*TM.getMCSubtargetInfo());
+  NewSTI.setFeatureBits(MF.getSubtarget().getFeatureBits());
+  STI = &NewSTI;
+
+  return AsmPrinter::SetupMachineFunction(MF);
 }
 
 // Force static initialization.

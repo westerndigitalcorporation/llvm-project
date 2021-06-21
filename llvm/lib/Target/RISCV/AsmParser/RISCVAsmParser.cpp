@@ -59,6 +59,7 @@ struct ParserOptionsSet {
 
 class RISCVAsmParser : public MCTargetAsmParser {
   SmallVector<FeatureBitset, 4> FeatureBitStack;
+  bool WarnOnReservedReg = true;
 
   SmallVector<ParserOptionsSet, 4> ParserOptionsStack;
   ParserOptionsSet ParserOptions;
@@ -389,7 +390,9 @@ public:
       return false;
     return RISCVAsmParser::classifySymbolRef(getImm(), VK) &&
            (VK == RISCVMCExpr::VK_RISCV_CALL ||
-            VK == RISCVMCExpr::VK_RISCV_CALL_PLT);
+            VK == RISCVMCExpr::VK_RISCV_CALL_PLT ||
+            VK == RISCVMCExpr::VK_RISCV_OVLCALL ||
+            VK == RISCVMCExpr::VK_RISCV_OVL2RESCALL);
   }
 
   bool isPseudoJumpSymbol() const {
@@ -618,7 +621,9 @@ public:
     return IsValid && ((IsConstantImm && VK == RISCVMCExpr::VK_RISCV_None) ||
                        VK == RISCVMCExpr::VK_RISCV_LO ||
                        VK == RISCVMCExpr::VK_RISCV_PCREL_LO ||
-                       VK == RISCVMCExpr::VK_RISCV_TPREL_LO);
+                       VK == RISCVMCExpr::VK_RISCV_TPREL_LO ||
+                       VK == RISCVMCExpr::VK_RISCV_OVLPLT_LO ||
+                       VK == RISCVMCExpr::VK_RISCV_OVL_LO);
   }
 
   bool isSImm12Lsb0() const { return isBareSimmNLsb0<12>(); }
@@ -645,11 +650,15 @@ public:
     if (!IsConstantImm) {
       IsValid = RISCVAsmParser::classifySymbolRef(getImm(), VK);
       return IsValid && (VK == RISCVMCExpr::VK_RISCV_HI ||
-                         VK == RISCVMCExpr::VK_RISCV_TPREL_HI);
+                         VK == RISCVMCExpr::VK_RISCV_TPREL_HI ||
+                         VK == RISCVMCExpr::VK_RISCV_OVLPLT_HI ||
+                         VK == RISCVMCExpr::VK_RISCV_OVL_HI);
     } else {
       return isUInt<20>(Imm) && (VK == RISCVMCExpr::VK_RISCV_None ||
                                  VK == RISCVMCExpr::VK_RISCV_HI ||
-                                 VK == RISCVMCExpr::VK_RISCV_TPREL_HI);
+                                 VK == RISCVMCExpr::VK_RISCV_TPREL_HI ||
+                                 VK == RISCVMCExpr::VK_RISCV_OVLPLT_HI ||
+                                 VK == RISCVMCExpr::VK_RISCV_OVL_HI);
     }
   }
 
@@ -1479,6 +1488,12 @@ OperandMatchResultTy RISCVAsmParser::parseCallSymbol(OperandVector &Operands) {
   if (Identifier.consume_back("@plt"))
     Kind = RISCVMCExpr::VK_RISCV_CALL_PLT;
 
+  if (Identifier.consume_back("@overlay"))
+    Kind = RISCVMCExpr::VK_RISCV_OVLCALL;
+
+  if (Identifier.consume_back("@resident"))
+    Kind = RISCVMCExpr::VK_RISCV_OVL2RESCALL;
+
   MCSymbol *Sym = getContext().getOrCreateSymbol(Identifier);
   Res = MCSymbolRefExpr::create(Sym, MCSymbolRefExpr::VK_None, getContext());
   Res = RISCVMCExpr::create(Res, Kind, getContext());
@@ -1946,10 +1961,34 @@ bool RISCVAsmParser::parseDirectiveOption() {
     return false;
   }
 
+  if (Option == "warnreservedreg") {
+    getTargetStreamer().emitDirectiveOptionWarnReservedReg();
+
+    Parser.Lex();
+    if (Parser.getTok().isNot(AsmToken::EndOfStatement))
+      return Error(Parser.getTok().getLoc(),
+                   "unexpected token, expected end of statement");
+
+    WarnOnReservedReg = true;
+    return false;
+  }
+
+  if (Option == "nowarnreservedreg") {
+    getTargetStreamer().emitDirectiveOptionNoWarnReservedReg();
+
+    Parser.Lex();
+    if (Parser.getTok().isNot(AsmToken::EndOfStatement))
+      return Error(Parser.getTok().getLoc(),
+                   "unexpected token, expected end of statement");
+
+    WarnOnReservedReg = false;
+    return false;
+  }
+
   // Unknown option.
   Warning(Parser.getTok().getLoc(),
-          "unknown option, expected 'push', 'pop', 'rvc', 'norvc', 'relax' or "
-          "'norelax'");
+          "unknown option, expected 'push', 'pop', 'rvc', 'norvc', 'relax', "
+          "'norelax', 'warnreservedreg' or 'nowarnreservedreg'");
   Parser.eatToEndOfStatement();
   return false;
 }
@@ -2195,7 +2234,53 @@ bool RISCVAsmParser::parseDirectiveAttribute() {
   return false;
 }
 
+// Since only a RISCVGenSubtargetInfo is available here, extract register
+// reservation directly from the STI bitfields.
+static bool isRegisterReserved(MCRegister Reg, const MCSubtargetInfo &STI) {
+  switch (Reg) {
+  default: return false;
+  case RISCV::X1: return STI.getFeatureBits()[RISCV::FeatureReserveX1];
+  case RISCV::X2: return STI.getFeatureBits()[RISCV::FeatureReserveX2];
+  case RISCV::X3: return STI.getFeatureBits()[RISCV::FeatureReserveX3];
+  case RISCV::X4: return STI.getFeatureBits()[RISCV::FeatureReserveX4];
+  case RISCV::X5: return STI.getFeatureBits()[RISCV::FeatureReserveX5];
+  case RISCV::X6: return STI.getFeatureBits()[RISCV::FeatureReserveX6];
+  case RISCV::X7: return STI.getFeatureBits()[RISCV::FeatureReserveX7];
+  case RISCV::X8: return STI.getFeatureBits()[RISCV::FeatureReserveX8];
+  case RISCV::X9: return STI.getFeatureBits()[RISCV::FeatureReserveX9];
+  case RISCV::X10: return STI.getFeatureBits()[RISCV::FeatureReserveX10];
+  case RISCV::X11: return STI.getFeatureBits()[RISCV::FeatureReserveX11];
+  case RISCV::X12: return STI.getFeatureBits()[RISCV::FeatureReserveX12];
+  case RISCV::X13: return STI.getFeatureBits()[RISCV::FeatureReserveX13];
+  case RISCV::X14: return STI.getFeatureBits()[RISCV::FeatureReserveX14];
+  case RISCV::X15: return STI.getFeatureBits()[RISCV::FeatureReserveX15];
+  case RISCV::X16: return STI.getFeatureBits()[RISCV::FeatureReserveX16];
+  case RISCV::X17: return STI.getFeatureBits()[RISCV::FeatureReserveX17];
+  case RISCV::X18: return STI.getFeatureBits()[RISCV::FeatureReserveX18];
+  case RISCV::X19: return STI.getFeatureBits()[RISCV::FeatureReserveX19];
+  case RISCV::X20: return STI.getFeatureBits()[RISCV::FeatureReserveX20];
+  case RISCV::X21: return STI.getFeatureBits()[RISCV::FeatureReserveX21];
+  case RISCV::X22: return STI.getFeatureBits()[RISCV::FeatureReserveX22];
+  case RISCV::X23: return STI.getFeatureBits()[RISCV::FeatureReserveX23];
+  case RISCV::X24: return STI.getFeatureBits()[RISCV::FeatureReserveX24];
+  case RISCV::X25: return STI.getFeatureBits()[RISCV::FeatureReserveX25];
+  case RISCV::X26: return STI.getFeatureBits()[RISCV::FeatureReserveX26];
+  case RISCV::X27: return STI.getFeatureBits()[RISCV::FeatureReserveX27];
+  case RISCV::X28: return STI.getFeatureBits()[RISCV::FeatureReserveX28];
+  case RISCV::X29: return STI.getFeatureBits()[RISCV::FeatureReserveX29];
+  case RISCV::X30: return STI.getFeatureBits()[RISCV::FeatureReserveX30];
+  case RISCV::X31: return STI.getFeatureBits()[RISCV::FeatureReserveX31];
+  }
+}
+
 void RISCVAsmParser::emitToStreamer(MCStreamer &S, const MCInst &Inst) {
+  // Provide a warning about defs of reserved registers.
+  auto &Desc = MII.get(Inst.getOpcode());
+  for (unsigned i = 0; i < Desc.getNumDefs(); i++) {
+    if (Inst.getOperand(i).isReg() && isRegisterReserved(Inst.getOperand(i).getReg(), getSTI()) && WarnOnReservedReg)
+      Warning(Inst.getLoc(), "Instruction modifies reserved register");
+  }
+
   MCInst CInst;
   bool Res = compressInst(CInst, Inst, getSTI(), S.getContext());
   if (Res)

@@ -36,6 +36,8 @@ void RISCVTargetStreamer::emitTextAttribute(unsigned Attribute,
 void RISCVTargetStreamer::emitIntTextAttribute(unsigned Attribute,
                                                unsigned IntValue,
                                                StringRef StringValue) {}
+void RISCVTargetStreamer::emitDirectiveOptionWarnReservedReg() {}
+void RISCVTargetStreamer::emitDirectiveOptionNoWarnReservedReg() {}
 
 void RISCVTargetStreamer::emitTargetAttributes(const MCSubtargetInfo &STI) {
   if (STI.hasFeature(RISCV::FeatureRV32E))
@@ -147,3 +149,11 @@ void RISCVTargetAsmStreamer::emitIntTextAttribute(unsigned Attribute,
                                                   StringRef StringValue) {}
 
 void RISCVTargetAsmStreamer::finishAttributeSection() {}
+
+void RISCVTargetAsmStreamer::emitDirectiveOptionWarnReservedReg() {
+  OS << "\t.option\twarnreservedreg\n";
+}
+
+void RISCVTargetAsmStreamer::emitDirectiveOptionNoWarnReservedReg() {
+  OS << "\t.option\tnowarnreservedreg\n";
+}

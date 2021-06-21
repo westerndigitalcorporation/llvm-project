@@ -35,13 +35,18 @@ const RISCVMCExpr *RISCVMCExpr::create(const MCExpr *Expr, VariantKind Kind,
 void RISCVMCExpr::printImpl(raw_ostream &OS, const MCAsmInfo *MAI) const {
   VariantKind Kind = getKind();
   bool HasVariant = ((Kind != VK_RISCV_None) && (Kind != VK_RISCV_CALL) &&
-                     (Kind != VK_RISCV_CALL_PLT));
+                     (Kind != VK_RISCV_CALL_PLT) && (Kind != VK_RISCV_OVLCALL) &&
+                     (Kind != VK_RISCV_OVL2RESCALL));
 
   if (HasVariant)
     OS << '%' << getVariantKindName(getKind()) << '(';
   Expr->print(OS, MAI);
   if (Kind == VK_RISCV_CALL_PLT)
     OS << "@plt";
+  if (Kind == VK_RISCV_OVLCALL)
+    OS << "@overlay";
+  if (Kind == VK_RISCV_OVL2RESCALL)
+    OS << "@resident";
   if (HasVariant)
     OS << ')';
 }
@@ -110,6 +115,8 @@ bool RISCVMCExpr::evaluateAsRelocatableImpl(MCValue &Res,
     case VK_RISCV_TPREL_ADD:
     case VK_RISCV_TLS_GOT_HI:
     case VK_RISCV_TLS_GD_HI:
+    case VK_RISCV_OVL_LO:
+    case VK_RISCV_OVL_HI:
       return false;
     }
   }
@@ -133,6 +140,10 @@ RISCVMCExpr::VariantKind RISCVMCExpr::getVariantKindForName(StringRef name) {
       .Case("tprel_add", VK_RISCV_TPREL_ADD)
       .Case("tls_ie_pcrel_hi", VK_RISCV_TLS_GOT_HI)
       .Case("tls_gd_pcrel_hi", VK_RISCV_TLS_GD_HI)
+      .Case("overlay_lo", VK_RISCV_OVL_LO)
+      .Case("overlay_hi", VK_RISCV_OVL_HI)
+      .Case("overlay_pltlo", VK_RISCV_OVLPLT_LO)
+      .Case("overlay_plthi", VK_RISCV_OVLPLT_HI)
       .Default(VK_RISCV_Invalid);
 }
 
@@ -167,6 +178,14 @@ StringRef RISCVMCExpr::getVariantKindName(VariantKind Kind) {
     return "call_plt";
   case VK_RISCV_32_PCREL:
     return "32_pcrel";
+  case VK_RISCV_OVL_LO:
+    return "overlay_lo";
+  case VK_RISCV_OVL_HI:
+    return "overlay_hi";
+  case VK_RISCV_OVLPLT_LO:
+    return "overlay_pltlo";
+  case VK_RISCV_OVLPLT_HI:
+    return "overlay_plthi";
   }
   llvm_unreachable("Invalid ELF symbol kind");
 }
@@ -220,7 +239,8 @@ bool RISCVMCExpr::evaluateAsConstant(int64_t &Res) const {
       Kind == VK_RISCV_GOT_HI || Kind == VK_RISCV_TPREL_HI ||
       Kind == VK_RISCV_TPREL_LO || Kind == VK_RISCV_TPREL_ADD ||
       Kind == VK_RISCV_TLS_GOT_HI || Kind == VK_RISCV_TLS_GD_HI ||
-      Kind == VK_RISCV_CALL || Kind == VK_RISCV_CALL_PLT)
+      Kind == VK_RISCV_CALL || Kind == VK_RISCV_CALL_PLT ||
+      Kind == VK_RISCV_OVLCALL || Kind == VK_RISCV_OVL2RESCALL)
     return false;
 
   if (!getSubExpr()->evaluateAsRelocatable(Value, nullptr, nullptr))
