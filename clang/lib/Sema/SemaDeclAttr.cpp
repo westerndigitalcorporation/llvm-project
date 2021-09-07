@@ -8592,19 +8592,6 @@ void Sema::ProcessDeclAttributes(Scope *S, Decl *D, const Declarator &PD) {
 
   // Apply additional attributes specified by '#pragma clang attribute'.
   AddPragmaAttributes(S, D);
-
-  // Depending on language options try and add the RISCVOverlayCall attribute
-  // to every function. This won't always be appropriate (eg static functions)
-  // but that will be handled later.
-  if (Context.getTargetInfo().hasDefaultOverlayCall()) {
-    Attr *OverlayAttr =
-        ::new(Context) RISCVOverlayCallAttr(Context, D->getSourceRange());
-    Attr *NoInline =
-        ::new(Context) NoInlineAttr(Context, D->getSourceRange());
-
-    D->addAttr(OverlayAttr);
-    D->addAttr(NoInline);
-  }
 }
 
 /// Is the given declaration allowed to use a forbidden type?
